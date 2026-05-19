@@ -1,0 +1,17 @@
+# claude-automation 内で reusable-impl-fix.yml を発火させるテスト用 workflow
+
+name: Test - Claude Impl Fix (lab)
+
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  impl-fix:
+    if: |
+      (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested') ||
+      github.event_name == 'pull_request_review_comment'
+    uses: ./.github/workflows/reusable-impl-fix.yml
+    secrets: inherit

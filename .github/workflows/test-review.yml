@@ -1,0 +1,17 @@
+# claude-automation 内で reusable-review.yml を発火させるテスト用 workflow
+
+name: Test - Claude Review (lab)
+
+on:
+  pull_request:
+    types: [ready_for_review]
+  issue_comment:
+    types: [created]
+
+jobs:
+  review:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '<!-- claude:impl-done -->'))
+    uses: ./.github/workflows/reusable-review.yml
+    secrets: inherit

@@ -1,0 +1,14 @@
+# claude-automation 内で reusable-impl.yml を発火させるテスト用 workflow
+# lab 内でループガード対策や workflow 動作確認に使う
+
+name: Test - Claude Impl (lab)
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  impl:
+    if: github.event.label.name == 'claude:ready'
+    uses: ./.github/workflows/reusable-impl.yml
+    secrets: inherit

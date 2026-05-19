@@ -1,0 +1,73 @@
+# SKELETON: レビュー指摘を受けて実装 Claude が修正する reusable workflow
+# push と「対応完了レポート」コメント投稿を 1 ジョブで完結させる
+#
+# 起動例(利用者側):
+#   on:
+#     pull_request_review:
+#       types: [submitted]
+#     pull_request_review_comment:
+#       types: [created]
+#   jobs:
+#     impl-fix:
+#       if: |
+#         (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested') ||
+#         github.event_name == 'pull_request_review_comment'
+#       uses: win2cot/claude-automation/.github/workflows/reusable-impl-fix.yml@v1
+#       secrets: inherit
+
+name: Reusable - Claude Impl Fix
+
+on:
+  workflow_call:
+    secrets:
+      CLAUDE_IMPL_APP_ID:
+        required: true
+      CLAUDE_IMPL_PRIVATE_KEY:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: true
+
+concurrency:
+  group: claude-impl-fix-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  impl-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # 実装 Claude 自身のレビューやコメントでループしないようにガード
+    if: |
+      github.event.sender.type != 'Bot' ||
+      !contains(github.event.sender.login, 'claude-impl')
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Generate App token (impl)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_IMPL_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_IMPL_PRIVATE_KEY }}
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      # TODO: 以下を 1 ジョブで完結させる
+      # 1. 全レビューコメント + 未対応テーブル + 過去対応履歴を読む
+      # 2. 修正コミット push
+      # 3. PR description の未対応テーブル更新
+      # 4. PR コメントで「対応完了レポート」投稿(<!-- claude:impl-done --> マーカー必須)
+      - name: Run Claude (impl-fix)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          echo "TODO: Claude Code Action 呼び出し"
+          echo "PR: ${{ github.event.pull_request.number }}"
+          # system prompt: .github/claude/system-impl.md を読む

@@ -1,0 +1,67 @@
+# SKELETON: needs-human-decision ラベル付与時に人を呼ぶ + auto-merge 無効化
+#
+# 起動例(利用者側):
+#   on:
+#     issues:
+#       types: [labeled]
+#     pull_request:
+#       types: [labeled]
+#   jobs:
+#     notify:
+#       if: github.event.label.name == 'needs-human-decision'
+#       uses: win2cot/claude-automation/.github/workflows/reusable-notify-human.yml@v1
+#       secrets: inherit
+#       with:
+#         mention: '@win2cot'
+
+name: Reusable - Notify Human
+
+on:
+  workflow_call:
+    inputs:
+      mention:
+        description: 'メンション先(例: @win2cot)'
+        required: false
+        default: '@win2cot'
+        type: string
+    secrets:
+      CLAUDE_IMPL_APP_ID:
+        required: false
+      CLAUDE_IMPL_PRIVATE_KEY:
+        required: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_IMPL_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_IMPL_PRIVATE_KEY }}
+
+      - name: Post mention comment
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          ISSUE_OR_PR=${{ github.event.issue.number || github.event.pull_request.number }}
+          gh issue comment $ISSUE_OR_PR \
+            --repo ${{ github.repository }} \
+            --body "${{ inputs.mention }} 設計分岐に直面しました。直前の Claude コメントから理由と推奨案を確認の上、判断をお願いします。"
+
+      - name: Disable auto-merge (safety)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          # PR の場合のみ
+          if [ "${{ github.event.pull_request.number }}" != "" ]; then
+            gh pr merge ${{ github.event.pull_request.number }} \
+              --disable-auto \
+              --repo ${{ github.repository }} || true
+          fi

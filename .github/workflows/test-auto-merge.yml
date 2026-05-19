@@ -1,0 +1,15 @@
+# claude-automation 内で reusable-auto-merge.yml を発火させるテスト用 workflow
+
+name: Test - Claude Auto Merge (lab)
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  auto-merge:
+    if: |
+      github.event.review.state == 'approved' &&
+      !contains(github.event.pull_request.labels.*.name, 'needs-human-decision')
+    uses: ./.github/workflows/reusable-auto-merge.yml
+    secrets: inherit

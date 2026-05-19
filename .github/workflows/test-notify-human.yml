@@ -1,0 +1,17 @@
+# claude-automation 内で reusable-notify-human.yml を発火させるテスト用 workflow
+
+name: Test - Notify Human (lab)
+
+on:
+  issues:
+    types: [labeled]
+  pull_request:
+    types: [labeled]
+
+jobs:
+  notify:
+    if: github.event.label.name == 'needs-human-decision'
+    uses: ./.github/workflows/reusable-notify-human.yml
+    secrets: inherit
+    with:
+      mention: '@win2cot'

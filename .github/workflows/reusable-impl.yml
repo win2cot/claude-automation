@@ -1,0 +1,76 @@
+# SKELETON: 実装 Claude(Issue → PR 作成)を起動する reusable workflow
+# 利用者リポジトリ(tasks-webapi 等)から uses: で呼ばれる
+#
+# 起動例(利用者側):
+#   on:
+#     issues:
+#       types: [labeled]
+#   jobs:
+#     impl:
+#       if: github.event.label.name == 'claude:ready'
+#       uses: win2cot/claude-automation/.github/workflows/reusable-impl.yml@v1
+#       secrets: inherit
+
+name: Reusable - Claude Impl
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: 'Issue 番号(省略時は github.event から自動取得)'
+        required: false
+        type: string
+      task_type:
+        description: 'task-type ラベル(impl / design)'
+        required: false
+        default: 'impl'
+        type: string
+    secrets:
+      CLAUDE_IMPL_APP_ID:
+        required: true
+      CLAUDE_IMPL_PRIVATE_KEY:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: true
+
+concurrency:
+  group: claude-impl-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  impl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Generate App token (impl)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_IMPL_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_IMPL_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      # TODO: anthropics/claude-code-action の正式呼び出しに置き換える
+      - name: Run Claude (impl)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          TASK_TYPE: ${{ inputs.task_type }}
+        run: |
+          echo "TODO: Claude Code Action 呼び出し"
+          echo "Issue: ${{ github.event.issue.number || inputs.issue_number }}"
+          echo "Task type: ${TASK_TYPE}"
+          # system prompt: .github/claude/system-impl.md を読む
+          # 1. Issue 解析 → 実装方針コメント投稿
+          # 2. ブランチ作成
+          # 3. 実装コミット
+          # 4. PR (draft) open → ready 化

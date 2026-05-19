@@ -1,0 +1,67 @@
+# SKELETON: レビュワ Claude が PR を初回レビュー / 再レビューする reusable workflow
+#
+# 起動例(利用者側):
+#   on:
+#     pull_request:
+#       types: [ready_for_review]
+#     issue_comment:
+#       types: [created]
+#   jobs:
+#     review:
+#       if: |
+#         github.event_name == 'pull_request' ||
+#         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '<!-- claude:impl-done -->'))
+#       uses: win2cot/claude-automation/.github/workflows/reusable-review.yml@v1
+#       secrets: inherit
+
+name: Reusable - Claude Review
+
+on:
+  workflow_call:
+    secrets:
+      CLAUDE_REVIEW_APP_ID:
+        required: true
+      CLAUDE_REVIEW_PRIVATE_KEY:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: true
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Generate App token (review)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_REVIEW_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_REVIEW_PRIVATE_KEY }}
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.event.pull_request.head.ref || github.event.issue.pull_request.head.ref }}
+          fetch-depth: 0
+
+      # TODO: レビュー実行
+      # 1. PR 全差分 + 全レビューコメント + 最新「対応完了レポート」 + 未対応テーブル + 規約 + ADR を読む
+      # 2. 観点チェックリストを必ず出力
+      # 3. approve 条件を満たせば approve、満たさなければ Review (changes_requested) で submit
+      - name: Run Claude (review)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          echo "TODO: Claude Code Action 呼び出し"
+          echo "PR: ${{ github.event.pull_request.number || github.event.issue.number }}"
+          # system prompt: .github/claude/system-review.md を読む

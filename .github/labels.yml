@@ -1,0 +1,19 @@
+# claude-automation 関連の新規ラベル定義
+# label-sync 等のツールで実リポジトリと同期させる前提
+# 既存 20 ラベル(area/* + priority/* 等)はここに含めない(各リポジトリで管理)
+
+- name: "claude:ready"
+  color: "1f883d"
+  description: "実装着手 OK のサイン。人が付与すると実装 Claude が起動"
+
+- name: "needs-human-decision"
+  color: "d1242f"
+  description: "設計分岐 or 同一指摘の繰り返し。人の判断待ち。auto-merge は無効化"
+
+- name: "task-type:impl"
+  color: "0969da"
+  description: "コード実装が主体のタスク。観点は規約・テスト・エラーハンドリング等"
+
+- name: "task-type:design"
+  color: "8250df"
+  description: "規約・ADR・設計書の追加/変更タスク。観点は用語・図表整合・カスケード"
