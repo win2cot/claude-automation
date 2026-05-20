@@ -8,6 +8,16 @@ on:
   issue_comment:
     types: [created]
 
+# reusable workflow の jobs.<job>.permissions は呼び出し側の permissions の subset である必要があるため、
+# 呼び出し側でも reusable-review.yml と同等の権限を明示する(GitHub Actions の仕様)。
+# C-2/C-3 で他の test-*.yml も同様に permissions を追加すること。
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
 jobs:
   review:
     if: |
