@@ -60,7 +60,27 @@ GitHub Settings → Developer settings → GitHub Apps → New GitHub App
 | `CLAUDE_IMPL_PRIVATE_KEY` | impl 用 App の private key(.pem ファイルの中身まるごと) |
 | `CLAUDE_REVIEW_APP_ID` | review 用 App の App ID |
 | `CLAUDE_REVIEW_PRIVATE_KEY` | review 用 App の private key |
-| `ANTHROPIC_API_KEY` | Anthropic API キー |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth トークン(`sk-ant-oat01-...`)。後述の手順で取得 |
+
+### CLAUDE_CODE_OAUTH_TOKEN の取得手順
+
+本プロジェクトでは Anthropic API Key ではなく、Claude Max プランの OAuth トークンを使う(追加課金なし)。`anthropics/claude-code-action` は `claude_code_oauth_token` 入力で公式サポートされている。
+
+1. ローカル(Claude Code が動く環境)で以下を実行:
+
+   ```bash
+   claude setup-token
+   ```
+
+2. ブラウザが開いて Anthropic にログイン(Max プランのアカウント)→ 認可
+3. ターミナルに `sk-ant-oat01-...` 形式のトークンが表示される
+4. このトークンを GitHub Secret `CLAUDE_CODE_OAUTH_TOKEN` として両リポジトリに登録
+
+注意事項:
+
+- このトークンは長期有効。漏洩した場合は Claude の Settings から revoke
+- Max プランの利用枠を消費する(API Key とは別経路)
+- OAuth トークンの利用は **Anthropic 公式 Action 内** に限定し、サードパーティツールでは使わない(Anthropic ToS の制約)
 
 ## 5. Workflow での使い方
 
@@ -81,8 +101,8 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github-token: ${{ steps.app-token.outputs.token }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
 ```
 
 ## 6. 動作確認

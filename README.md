@@ -60,7 +60,7 @@ jobs:
 ## セットアップ
 
 1. GitHub App を 2 つ作成(impl 用 / review 用) → `docs/ops/setup-github-app.md`
-2. リポジトリに Secrets を登録(`CLAUDE_IMPL_APP_ID`, `CLAUDE_IMPL_PRIVATE_KEY`, `CLAUDE_REVIEW_APP_ID`, `CLAUDE_REVIEW_PRIVATE_KEY`, `ANTHROPIC_API_KEY`)
+2. リポジトリに Secrets を登録(`CLAUDE_IMPL_APP_ID`, `CLAUDE_IMPL_PRIVATE_KEY`, `CLAUDE_REVIEW_APP_ID`, `CLAUDE_REVIEW_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`)。OAuth トークンは `claude setup-token` で取得
 3. ブランチ保護を設定(Required check は既存 CI のみ。Claude workflow は含めない)
 4. `samples/dummy-app/` でループガード検証(`tests/loop-guard/README.md`)
 5. tasks-webapi 等の利用者リポジトリから reusable workflow を呼ぶ
