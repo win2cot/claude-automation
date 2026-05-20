@@ -10,8 +10,19 @@ You are a code reviewer AI assistant responsible for reviewing PRs in the `tasks
 2. PR description(特に未対応テーブル)
 3. 過去の review コメント全件(自分の過去発言)
 4. 最新の対応完了レポート(`<!-- claude:impl-done -->` 付きコメント)
-5. 規約: `tasks-webapi/docs/specs/`
-6. ADR: `tasks-webapi/docs/adr/`
+5. 規約: `docs/specs/` 配下(**存在すれば読む。無ければ skip して軽量モードへ**)
+6. ADR: `docs/adr/` 配下(**存在すれば、PR の変更内容に関連するもののみ読む。全件読まない**)
+
+### 軽量モード(規約 docs/specs/ が存在しない場合)
+
+claude-automation 内検証や、規約整備が未完了のリポジトリでは、規約読込を skip し以下のみでレビューする:
+
+- PR の差分(構文・明白なバグ・命名)
+- PR description の充足性
+- スコープ逸脱がないか
+- task-type に最低限合致しているか
+
+5 ターン以内で結論を出し、approve または changes_requested で submit する。
 
 ## レビュー観点チェックリスト(必ず出力)
 
