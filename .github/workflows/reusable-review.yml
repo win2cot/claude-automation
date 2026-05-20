@@ -1,6 +1,8 @@
-# SKELETON: レビュワ Claude が PR を初回レビュー / 再レビューする reusable workflow
+# レビュワ Claude が PR を初回レビュー / 再レビューする reusable workflow
+# 認証: CLAUDE_REVIEW App + CLAUDE_CODE_OAUTH_TOKEN(Claude Max プラン枠)
+# 起動条件は利用者側 workflow で if 制御(例は下記コメント参照)
 #
-# 起動例(利用者側):
+# 起動例(利用者側 / 本リポの test-review.yml も同様):
 #   on:
 #     pull_request:
 #       types: [ready_for_review]
@@ -34,10 +36,13 @@ jobs:
   review:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # claude-code-action@v1 が要求する権限セット(actions:read は CI 結果読み取り、id-token:write は OIDC)
     permissions:
       contents: read
       pull-requests: write
       issues: write
+      id-token: write
+      actions: read
     steps:
       - name: Generate App token (review)
         id: app-token
@@ -53,20 +58,32 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.event.issue.pull_request.head.ref }}
           fetch-depth: 0
 
-      # TODO: レビュー実行
-      # 1. PR 全差分 + 全レビューコメント + 最新「対応完了レポート」 + 未対応テーブル + 規約 + ADR を読む
-      # 2. 観点チェックリストを必ず出力
-      # 3. approve 条件を満たせば approve、満たさなければ Review (changes_requested) で submit
-      - name: Run Claude (review)
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+      # system prompt は .github/claude/system-review.md を外部読み込み
+      # 理由: workflow file の prompt 文字列を変更する PR は Anthropic 側 checksum で実行ブロックされるため、
+      #       workflow file 自体を変えずに system prompt を更新できる構成にする(ADR-0001 §2.5 / R20)
+      - name: Load review system prompt
+        id: sysprompt
         run: |
-          echo "TODO: anthropics/claude-code-action 呼び出し"
-          echo "PR: ${{ github.event.pull_request.number || github.event.issue.number }}"
-          # 実装時は以下のような呼び出しに置き換える:
-          # - uses: anthropics/claude-code-action@v1
-          #   with:
-          #     claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          #     github_token: ${{ steps.app-token.outputs.token }}
-          # system prompt: .github/claude/system-review.md を読む
+          {
+            echo 'SYSTEM<<CLAUDE_PROMPT_EOF'
+            cat .github/claude/system-review.md
+            echo 'CLAUDE_PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude Code Action (review)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          # prompt が与えられるため Automation mode で起動する
+          prompt: |
+            あなたはレビュワ Claude です。次の PR / Issue をレビューしてください。
+
+            - Number: ${{ github.event.pull_request.number || github.event.issue.number }}
+            - Event: ${{ github.event_name }}
+
+            必ず system prompt(append-system-prompt として注入される)に従い、観点チェックリストを出力したうえで approve または changes_requested で submit してください。
+          claude_args: |
+            --max-turns 20
+            --append-system-prompt
+            ${{ steps.sysprompt.outputs.SYSTEM }}

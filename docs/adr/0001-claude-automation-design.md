@@ -92,14 +92,29 @@ claude setup-token
 
 ローカル(Claude Code が動く環境)で実行すると、ブラウザ認可フローを経て `sk-ant-oat01-...` 形式の長期有効トークンが発行される。これを GitHub Secret `CLAUDE_CODE_OAUTH_TOKEN` として両リポジトリに登録する。
 
-### 2.5 Workflow validation エラーへの対策
+### 2.5 Workflow validation エラーと Action prompt 変更ブロックへの対策
 
-PR で workflow を変更すると `Workflow validation failed` で実行されない問題への対策:
+GitHub Actions と Anthropic 公式 Action の両方に、workflow file の変更を伴う PR で実行がブロックされる仕様がある。両者は独立した制約だが対策は重なる。
+
+#### (A) GitHub Workflow validation エラー(R19)
+
+PR で workflow を変更すると `Workflow validation failed` で実行されない。
+
+#### (B) Anthropic 公式 Action の prompt checksum 検証(R20)
+
+`anthropics/claude-code-action` は workflow file 内の `prompt` 文字列の checksum を取って検証している。PR diff に該当 workflow file が含まれていると、AI 実行が安全のためブロックされる。
+
+#### 共通対策
 
 1. **reusable workflow パターン**: tasks-webapi 側の `.github/workflows/*.yml` は claude-automation を `uses:` で呼ぶだけの薄い shim にし、本体ロジック変更は claude-automation 側で tag 運用(`@v1`, `@v2`)
 2. **Required check の選定**: ブランチ保護で Required にするのは既存 CI(ビルド・テスト・Lint)のみ。Claude 関連 workflow(claude-review, claude-impl, auto-merge)は Required にしない
 3. **workflow 変更を含む PR は専用 PR で先に main 取り込み**(他作業と混ぜない)
 4. **App permission に `actions: write` を付与**
+
+#### (B) 固有の追加対策
+
+5. **prompt は workflow file に直書きしない**: 主体は外部ファイル(`.github/claude/system-*.md`)に置き、workflow 内では `cat` で読み込んで `--append-system-prompt` 経由で渡す。これにより system prompt 更新時に workflow file 自体を変えずに済み、checksum 検証ブロックを回避できる
+6. **workflow file 自体の prompt は最小限**: PR/Issue 番号埋め込み・呼び出し手順サマリのみ。実体は system prompt 側に寄せる
 
 ### 2.6 task-type による派生
 
