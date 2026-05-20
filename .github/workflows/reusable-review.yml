@@ -23,7 +23,7 @@ on:
         required: true
       CLAUDE_REVIEW_PRIVATE_KEY:
         required: true
-      ANTHROPIC_API_KEY:
+      CLAUDE_CODE_OAUTH_TOKEN:
         required: true
 
 concurrency:
@@ -59,9 +59,14 @@ jobs:
       # 3. approve 条件を満たせば approve、満たさなければ Review (changes_requested) で submit
       - name: Run Claude (review)
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          echo "TODO: Claude Code Action 呼び出し"
+          echo "TODO: anthropics/claude-code-action 呼び出し"
           echo "PR: ${{ github.event.pull_request.number || github.event.issue.number }}"
+          # 実装時は以下のような呼び出しに置き換える:
+          # - uses: anthropics/claude-code-action@v1
+          #   with:
+          #     claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          #     github_token: ${{ steps.app-token.outputs.token }}
           # system prompt: .github/claude/system-review.md を読む
