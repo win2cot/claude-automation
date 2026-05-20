@@ -81,9 +81,15 @@ jobs:
 
             - Number: ${{ github.event.pull_request.number || github.event.issue.number }}
             - Event: ${{ github.event_name }}
+            - Repository: ${{ github.repository }}
+
+            重要な前提:
+            - 規約が `docs/specs/` に存在しない場合、規約読込を skip して system prompt の「軽量モード」に切り替える(無いものを探し続けない)
+            - ADR は `docs/adr/` に存在しても、PR の変更内容に関連するもののみ読む(全件読まない)
+            - 不要なファイル探索でターンを消費しない
 
             必ず system prompt(append-system-prompt として注入される)に従い、観点チェックリストを出力したうえで approve または changes_requested で submit してください。
           claude_args: |
-            --max-turns 20
+            --max-turns 30
             --append-system-prompt
             ${{ steps.sysprompt.outputs.SYSTEM }}
