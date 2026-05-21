@@ -10,7 +10,6 @@ on:
 
 # reusable workflow の jobs.<job>.permissions は呼び出し側の permissions の subset である必要があるため、
 # 呼び出し側でも reusable-review.yml と同等の権限を明示する(GitHub Actions の仕様)。
-# C-2/C-3 で他の test-*.yml も同様に permissions を追加すること。
 permissions:
   contents: read
   pull-requests: write
@@ -20,8 +19,11 @@ permissions:
 
 jobs:
   review:
+    # マーカー検索文字列は signal: claude-impl-done(C-3 で <!-- ... --> 形式が bash 履歴展開で
+    # <\!-- にエスケープされて contains が false になった、その対策。詳細は ADR-0001 §2.5)
+    # issue_comment は Issue と PR 両方で発火するため、PR コメント限定(github.event.issue.pull_request != null)を付ける
     if: |
       github.event_name == 'pull_request' ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '<!-- claude:impl-done -->'))
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, 'signal: claude-impl-done'))
     uses: ./.github/workflows/reusable-review.yml
     secrets: inherit

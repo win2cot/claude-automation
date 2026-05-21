@@ -28,7 +28,6 @@ on:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: true
 
-# 同一 PR への重複起動を防ぐ(直列実行)
 concurrency:
   group: claude-impl-fix-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -51,7 +50,6 @@ jobs:
           app-id: ${{ secrets.CLAUDE_IMPL_APP_ID }}
           private-key: ${{ secrets.CLAUDE_IMPL_PRIVATE_KEY }}
 
-      # 既存 PR ブランチに checkout(impl と違い main ではない)
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
@@ -59,13 +57,15 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      # git commit 用に bot identity を設定
       - name: Configure git identity (impl bot)
         run: |
           git config user.name "claude-automation-impl[bot]"
           git config user.email "${{ secrets.CLAUDE_IMPL_APP_ID }}+claude-automation-impl[bot]@users.noreply.github.com"
 
-      # prompt 統合方式(C-1/C-2 と同じ。workflow file の prompt リテラルは展開式のみ)
+      # prompt 統合方式(C-1/C-2/C-3 で確立)
+      # マーカーは <sub>signal: claude-impl-done</sub>(! を含まないので bash 履歴展開で
+      # エスケープされない。C-3 初回検証で <!-- ... --> 形式が <\!-- に変換されてマーカー
+      # 検知が失敗した、その対策)
       - name: Build full prompt
         id: prompt
         env:
@@ -98,23 +98,23 @@ jobs:
             echo ""
             echo "1. PR の全レビューコメント取得:"
             echo "   gh pr view ${PR_NUMBER} --json reviews,comments,body"
-            echo "2. 過去の対応完了レポート(コメント本文に <!-- claude:impl-done --> を含むもの)を確認"
+            echo "2. 過去の対応完了レポート(コメント本文に signal: claude-impl-done を含むもの)を確認"
             echo "3. PR description 内の「未対応レビュー」テーブルを読む"
             echo "4. 未対応または新規の指摘を特定し、各々について対応するか見送るかを判断"
             echo "5. 修正を実施(Write / Edit ツール使用)"
-            echo "6. git add -A && git commit -m \"<conventional commit message, 何の指摘への対応かを明記>\""
+            echo "6. git add -A && git commit -m '<conventional commit message>'"
             echo "7. git push origin ${PR_HEAD_REF}"
             echo "8. PR description を更新(未対応テーブルを最新状態に):"
-            echo "   gh pr edit ${PR_NUMBER} --body \"<更新後の description 全文>\""
-            echo "   ※ 既存 description を取得して必要箇所だけ書き換えて全文 set する"
-            echo "9. 対応完了レポートを PR コメントとして投稿(マーカー必須):"
-            echo "   gh pr comment ${PR_NUMBER} --body \"<対応完了レポート本文>\""
-            echo "   レポート本文は必ず先頭または末尾に <!-- claude:impl-done --> マーカーを含めること。"
-            echo "   レポートのフォーマットは docs/automation/conventions.md 参照。"
+            echo "   gh pr edit ${PR_NUMBER} --body '<更新後の description 全文>'"
+            echo "9. 対応完了レポートを PR コメントとして投稿(フッターマーカー必須):"
+            echo "   対応完了レポート本文の **最終行** に必ず以下のマーカーを含めること:"
+            echo "     <sub>signal: claude-impl-done</sub>"
+            echo "   投稿コマンド例(--body-file 経由が確実、シェルエスケープ回避):"
+            echo "     printf '%s\\n' '<レポート本文>' '<sub>signal: claude-impl-done</sub>' > /tmp/report.md"
+            echo "     gh pr comment ${PR_NUMBER} --body-file /tmp/report.md"
             echo ""
-            echo "# 対応完了レポートのテンプレート"
+            echo "# 対応完了レポートのテンプレート(--body-file で渡す中身)"
             echo ""
-            echo "<!-- claude:impl-done -->"
             echo "## 対応完了レポート"
             echo ""
             echo "### 対応サマリ"
@@ -125,18 +125,20 @@ jobs:
             echo "### 未対応テーブルの更新"
             echo "PR description の未対応テーブルを上記に合わせて更新済みです。"
             echo ""
+            echo "<sub>signal: claude-impl-done</sub>"
+            echo ""
             echo "# 設計分岐検知時"
             echo ""
             echo "ADR/規約に無い設計判断、破壊的 API 変更、本番影響大、スコープ拡大、同一指摘の繰り返しを検知した場合は **修正を止めて** 以下を実行する。push は行わない。"
             echo "  gh pr edit ${PR_NUMBER} --add-label needs-human-decision"
-            echo "  gh pr comment ${PR_NUMBER} --body \"## 設計判断が必要です ... @win2cot ジャッジをお願いします\""
+            echo "  gh pr comment ${PR_NUMBER} --body-file <heredoc経由> # 中身: '## 設計判断が必要です ... @win2cot ジャッジをお願いします'"
             echo ""
             echo "# 禁止事項"
             echo ""
             echo "- main への直 push"
             echo "- 自分自身の PR を approve"
             echo "- 規約 / ADR の新規創出(Issue 合意済みのみ可)"
-            echo "- 対応完了レポートマーカー <!-- claude:impl-done --> の省略(これがないと再レビューが起動しない)"
+            echo "- 対応完了レポートマーカー <sub>signal: claude-impl-done</sub> の省略(これがないと再レビューが起動しない)"
             echo 'CLAUDE_PROMPT_EOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -146,9 +148,8 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
           prompt: ${{ steps.prompt.outputs.PROMPT }}
-          # bot 連鎖を許可(review bot がトリガするため必須)
           allowed_bots: "claude-automation-impl,claude-automation-review"
           allowed_non_write_users: "claude-automation-impl,claude-automation-review"
           claude_args: |
             --max-turns 50
-            --allowedTools "Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git config:*),Bash(gh pr view:*),Bash(gh pr edit:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Bash(mkdir:*),Bash(touch:*),Bash(echo:*),Read,Write,Edit,Glob,Grep"
+            --allowedTools "Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git config:*),Bash(gh pr view:*),Bash(gh pr edit:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Bash(mkdir:*),Bash(touch:*),Bash(echo:*),Bash(printf:*),Read,Write,Edit,Glob,Grep"
