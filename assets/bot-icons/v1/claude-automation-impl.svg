@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="100" fill="#0969da"/>
+
+  <!-- Hammer head (rectangle) -->
+  <g transform="rotate(-35 100 100)">
+    <!-- Handle -->
+    <rect x="90" y="100" width="20" height="80" rx="4" fill="#8b4513" stroke="#5c2e0e" stroke-width="2"/>
+    <!-- Handle grip stripes -->
+    <line x1="92" y1="155" x2="108" y2="155" stroke="#5c2e0e" stroke-width="2"/>
+    <line x1="92" y1="165" x2="108" y2="165" stroke="#5c2e0e" stroke-width="2"/>
+    <line x1="92" y1="175" x2="108" y2="175" stroke="#5c2e0e" stroke-width="2"/>
+    <!-- Head -->
+    <rect x="55" y="60" width="90" height="42" rx="6" fill="#c9d1d9" stroke="#3d4248" stroke-width="3"/>
+    <!-- Head highlight -->
+    <rect x="60" y="64" width="80" height="8" rx="3" fill="#e6ebf0"/>
+    <!-- Claw end -->
+    <path d="M 55 70 L 38 60 L 38 80 L 50 88 Z" fill="#c9d1d9" stroke="#3d4248" stroke-width="3"/>
+  </g>
+</svg>

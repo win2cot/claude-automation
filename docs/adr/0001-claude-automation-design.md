@@ -92,6 +92,51 @@ claude setup-token
 
 ローカル(Claude Code が動く環境)で実行すると、ブラウザ認可フローを経て `sk-ant-oat01-...` 形式の長期有効トークンが発行される。これを GitHub Secret `CLAUDE_CODE_OAUTH_TOKEN` として両リポジトリに登録する。
 
+### 2.4.2 Claude Code Action 設定パターン(C-1 / C-2 で確立)
+
+`anthropics/claude-code-action@v1` を運用に乗せるには、デフォルトでは動かない箇所が複数ある。以下の 5 つを **全ての reusable workflow で標準化** する。
+
+#### (a) prompt 統合方式
+
+workflow file に prompt リテラルを直書きせず、事前 step で `cat .github/claude/system-*.md` を `$GITHUB_OUTPUT` に出力し、Action の `prompt:` 入力に統合する。`--append-system-prompt` を `claude_args` 経由で渡す方式は採用しない(複数行のシェル引数 escape が破綻する)。
+
+理由:
+- system prompt 更新時に workflow file 自体を変えずに済む(R20 prompt checksum 検証の回避)
+- workflow の `prompt:` リテラルは `${{ steps.prompt.outputs.PROMPT }}` の展開式で固定 → checksum が変わらない
+
+#### (b) `--allowedTools` 明示
+
+claude-code-action のデフォルトでは Bash や gh CLI の多くが permission denied になり、Claude が探索ループでターンを消費して失敗する(C-1 初回で `permission_denials_count: 23` を観測)。`claude_args` 内で `--allowedTools` を明示する。
+
+- review workflow 最小セット: `Bash(gh pr view/diff/comment/review/list:*),Bash(gh issue view/comment:*),Bash(gh api:*),Bash(ls/cat/find/grep/test:*),Read,Glob,Grep`
+- impl workflow 追加分: `Bash(git checkout/add/commit/push/status/diff/log/config:*),Bash(gh pr create/edit/ready:*),Bash(mkdir/touch/echo:*),Write,Edit`
+
+診断手順: ジョブが失敗したら SDK 出力の `permission_denials_count` を確認。0 でなければ拒否ツールを `--allowedTools` に追加する。
+
+#### (c) 軽量モード
+
+system prompt 内に「軽量モード」を定義し、`docs/specs/` が存在しないリポジトリでは規約読込を skip して簡素な実装/レビューを行う。claude-automation 内検証では軽量モード、本番(tasks-webapi)では通常モードに自動切替される。
+
+#### (d) bot 連鎖の明示許可
+
+`anthropics/claude-code-action@v1` は bot 同士のループ防止のため、デフォルトでは bot が起こしたイベントを拒否する。本設計の核(impl bot 起動 → PR ready → review bot 起動)を成立させるため、両方の入力を **両 reusable workflow で明示** する:
+
+- `allowed_bots: "claude-automation-impl,claude-automation-review"`(`checkHumanActor` を bypass)
+- `allowed_non_write_users: "claude-automation-impl,claude-automation-review"`(`checkWritePermissions` を bypass。bot は collaborator ではないため write 権限チェックでも 404 になる、issue #1133)
+
+`*` ワイルドカードは public リポジトリで外部 bot 起動リスクがあるため使わず、明示リストに限定する。
+
+#### (e) bot identity の git config
+
+実装 bot が commit するため、workflow 内で git identity を設定する。形式は GitHub の bot 命名規則に従う:
+
+```bash
+git config user.name "claude-automation-impl[bot]"
+git config user.email "${APP_ID}+claude-automation-impl[bot]@users.noreply.github.com"
+```
+
+`${APP_ID}` は GitHub App の数値 ID(impl は `3771731`、review は `3777120`)。
+
 ### 2.5 Workflow validation エラーと Action prompt 変更ブロックへの対策
 
 GitHub Actions と Anthropic 公式 Action の両方に、workflow file の変更を伴う PR で実行がブロックされる仕様がある。両者は独立した制約だが対策は重なる。
