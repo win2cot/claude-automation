@@ -1,6 +1,7 @@
-# SKELETON: needs-human-decision ラベル付与時に人を呼ぶ + auto-merge 無効化
+# needs-human-decision ラベル付与時に人を呼ぶ + auto-merge を保険で無効化する reusable workflow
+# 認証: CLAUDE_IMPL App(ラベル付与 / コメント投稿用、どちらの App でも可)
 #
-# 起動例(利用者側):
+# 起動例(利用者側 / 本リポの test-notify-human.yml も同様):
 #   on:
 #     issues:
 #       types: [labeled]
@@ -20,15 +21,19 @@ on:
   workflow_call:
     inputs:
       mention:
-        description: 'メンション先(例: @win2cot)'
+        description: 'メンション先(例: @win2cot)。指定しなければ @win2cot がデフォルト'
         required: false
         default: '@win2cot'
         type: string
     secrets:
       CLAUDE_IMPL_APP_ID:
-        required: false
+        required: true
       CLAUDE_IMPL_PRIVATE_KEY:
-        required: false
+        required: true
+
+concurrency:
+  group: claude-notify-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   notify:
@@ -39,29 +44,36 @@ jobs:
       pull-requests: write
       contents: write
     steps:
-      - name: Generate App token
+      - name: Generate App token (impl)
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.CLAUDE_IMPL_APP_ID }}
           private-key: ${{ secrets.CLAUDE_IMPL_PRIVATE_KEY }}
 
+      # メンションコメントを Issue または PR に投稿
       - name: Post mention comment
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          MENTION: ${{ inputs.mention }}
         run: |
-          ISSUE_OR_PR=${{ github.event.issue.number || github.event.pull_request.number }}
-          gh issue comment $ISSUE_OR_PR \
-            --repo ${{ github.repository }} \
-            --body "${{ inputs.mention }} 設計分岐に直面しました。直前の Claude コメントから理由と推奨案を確認の上、判断をお願いします。"
+          ISSUE_OR_PR_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+          # body はシェルクォートエスケープを避けるため --body-file 経由
+          BODY_FILE=$(mktemp)
+          printf '%s\n\n%s\n' \
+            "${MENTION} 設計分岐に直面しました。" \
+            "直前の Claude コメントから理由と推奨案を確認のうえ、判断をお願いします。" \
+            > "${BODY_FILE}"
+          gh issue comment "${ISSUE_OR_PR_NUMBER}" \
+            --repo "${{ github.repository }}" \
+            --body-file "${BODY_FILE}"
 
-      - name: Disable auto-merge (safety)
+      # PR の場合は保険として auto-merge を無効化(approve 後に分岐が付くケース対策)
+      - name: Disable auto-merge (safety, PR only)
+        if: github.event.pull_request.number != ''
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          # PR の場合のみ
-          if [ "${{ github.event.pull_request.number }}" != "" ]; then
-            gh pr merge ${{ github.event.pull_request.number }} \
-              --disable-auto \
-              --repo ${{ github.repository }} || true
-          fi
+          gh pr merge "${{ github.event.pull_request.number }}" \
+            --disable-auto \
+            --repo "${{ github.repository }}" || true

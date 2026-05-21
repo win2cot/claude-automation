@@ -1,6 +1,7 @@
-# SKELETON: レビュワ Claude が approve した PR の auto-merge を有効化
+# レビュワ Claude が approve した PR の auto-merge を有効化する reusable workflow
+# 認証: CLAUDE_REVIEW App(approve した actor で auto-merge 有効化することで整合性を保つ)
 #
-# 起動例(利用者側):
+# 起動例(利用者側 / 本リポの test-auto-merge.yml も同様):
 #   on:
 #     pull_request_review:
 #       types: [submitted]
@@ -22,6 +23,10 @@ on:
       CLAUDE_REVIEW_PRIVATE_KEY:
         required: true
 
+concurrency:
+  group: claude-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   enable-auto-merge:
     runs-on: ubuntu-latest
@@ -30,13 +35,15 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - name: Generate App token
+      - name: Generate App token (review)
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.CLAUDE_REVIEW_APP_ID }}
           private-key: ${{ secrets.CLAUDE_REVIEW_PRIVATE_KEY }}
 
+      # gh pr merge --auto は「条件を満たしたら自動的に merge する」状態を有効化する。
+      # 実際の merge は GitHub が approval + CI green + ブランチ保護条件を満たした時に行う。
       - name: Enable auto-merge
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
