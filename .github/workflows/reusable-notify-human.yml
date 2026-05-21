@@ -39,10 +39,11 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # この workflow はコメント投稿(issues:write)と auto-merge 無効化(pull-requests:write)のみ。
+    # contents:write は使わないので付与しない(最小権限原則)。
     permissions:
       issues: write
       pull-requests: write
-      contents: write
     steps:
       - name: Generate App token (impl)
         id: app-token
