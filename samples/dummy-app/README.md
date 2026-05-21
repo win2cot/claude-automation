@@ -27,3 +27,5 @@ samples/dummy-app/
 ## C-3 Test
 
 動作確認用追記。
+
+> Added: 2026-05-21
