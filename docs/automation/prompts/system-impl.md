@@ -32,9 +32,12 @@
 1. 全レビューコメント + 未対応テーブル + 過去対応履歴を読み込み
 2. 修正実装、push
 3. PR description の未対応テーブルを更新コミット
-4. PR コメントで「対応完了レポート」投稿(本文先頭に `<!-- claude:impl-done -->` マーカー必須)
+4. PR コメントで「対応完了レポート」投稿(本文末尾に `<sub>signal: claude-impl-done</sub>` マーカー必須)
+5. 投稿は `gh pr comment --body-file` 経由(printf でファイル生成、シェルエスケープ回避)
 
 対応完了レポートのテンプレートは `docs/automation/conventions.md` 参照。
+
+**マーカー設計の変遷**: 初期は HTML コメント `<!-- claude:impl-done -->` を使ったが、C-3 動作確認で bash 履歴展開エスケープにより `<\!--` に変換されて検知失敗。`!` を含まない `<sub>signal: claude-impl-done</sub>` 形式に変更(ADR-0001 §2.5)。
 
 ## task-type による派生
 
