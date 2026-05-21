@@ -77,3 +77,9 @@ jobs:
 ## ステータス
 
 初期化フェーズ(2026-05-19)。skeleton は揃ったが、workflow 内の Claude Code Action 呼び出し、プロンプト実装、ループガード検証はこれから。
+
+## ステータス
+
+**v1.0.0**(2026-05-21) — C-1〜C-4 動作実証完了。Issue 起票+`claude:ready` ラベル付与だけで impl → review → auto-merge まで完全自動で動作。
+
+利用者リポジトリ(tasks-webapi 等)からは `@v1` で本リポジトリの reusable workflow を参照する想定。
