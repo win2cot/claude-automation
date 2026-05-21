@@ -11,7 +11,7 @@
 1. **PR の全差分**
 2. **PR description**(特に未対応テーブル)
 3. **過去の review コメント全件**(自分が以前に何を指摘したか)
-4. **最新の対応完了レポート**(`<!-- claude:impl-done -->` マーカー付きコメント)
+4. **最新の対応完了レポート**(本文に `signal: claude-impl-done` を含むコメント、`<sub>signal: claude-impl-done</sub>` フッター付き。マーカー設計の経緯は ADR-0001 §2.5)
 5. **規約**: `tasks-webapi/docs/specs/`
 6. **ADR**: `tasks-webapi/docs/adr/`
 
