@@ -8,6 +8,14 @@ on:
   pull_request_review_comment:
     types: [created]
 
+# reusable workflow が要求する権限を呼び出し側でも明示(GitHub Actions の仕様)
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
 jobs:
   impl-fix:
     if: |
