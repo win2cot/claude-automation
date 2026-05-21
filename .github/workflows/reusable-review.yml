@@ -58,16 +58,42 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.event.issue.pull_request.head.ref }}
           fetch-depth: 0
 
-      # system prompt は .github/claude/system-review.md を外部読み込み
-      # 理由: workflow file の prompt 文字列を変更する PR は Anthropic 側 checksum で実行ブロックされるため、
-      #       workflow file 自体を変えずに system prompt を更新できる構成にする(ADR-0001 §2.5 / R20)
-      - name: Load review system prompt
-        id: sysprompt
+      # prompt は workflow file ではなく外部ファイル + 動的組立で生成する。
+      # 理由 1: workflow file の prompt 文字列を変更する PR は Anthropic 側 checksum で
+      #         AI 実行ブロックされるため、workflow file 自体に prompt リテラルを書かない
+      #         (ADR-0001 §2.5 R20)
+      # 理由 2: --append-system-prompt に複数行を渡す claude_args 経由のやり方は
+      #         シェル引数 escape が破綻しやすいため、prompt 入力に統合する
+      - name: Build full prompt
+        id: prompt
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
         run: |
           {
-            echo 'SYSTEM<<CLAUDE_PROMPT_EOF'
+            echo 'PROMPT<<CLAUDE_PROMPT_EOF'
+            echo "# Context"
+            echo ""
+            echo "- Target: PR/Issue #${PR_NUMBER}"
+            echo "- Event: ${EVENT_NAME}"
+            echo "- Repository: ${REPO}"
+            echo ""
+            echo "# Mode detection"
+            echo ""
+            echo "もし \`docs/specs/\` が存在しなければ **軽量モード** で動作する。"
+            echo "軽量モードでは規約読込を skip し、5 ターン以内に approve または changes_requested で submit すること。"
+            echo "不要なファイル探索でターンを消費しない。"
+            echo ""
+            echo "# Instructions (system prompt)"
+            echo ""
             cat .github/claude/system-review.md
-            echo 'CLAUDE_PROMPT_EOF'
+            echo ""
+            echo "# 最終出力要件"
+            echo ""
+            echo "PR レビューを **必ず submit** すること(comment ではなく review として)。"
+            echo "approve 条件を満たさなければ changes_requested で submit。"
+            echo "CLAUDE_PROMPT_EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Claude Code Action (review)
@@ -76,20 +102,5 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
           # prompt が与えられるため Automation mode で起動する
-          prompt: |
-            あなたはレビュワ Claude です。次の PR / Issue をレビューしてください。
-
-            - Number: ${{ github.event.pull_request.number || github.event.issue.number }}
-            - Event: ${{ github.event_name }}
-            - Repository: ${{ github.repository }}
-
-            重要な前提:
-            - 規約が `docs/specs/` に存在しない場合、規約読込を skip して system prompt の「軽量モード」に切り替える(無いものを探し続けない)
-            - ADR は `docs/adr/` に存在しても、PR の変更内容に関連するもののみ読む(全件読まない)
-            - 不要なファイル探索でターンを消費しない
-
-            必ず system prompt(append-system-prompt として注入される)に従い、観点チェックリストを出力したうえで approve または changes_requested で submit してください。
-          claude_args: |
-            --max-turns 30
-            --append-system-prompt
-            ${{ steps.sysprompt.outputs.SYSTEM }}
+          prompt: ${{ steps.prompt.outputs.PROMPT }}
+          claude_args: --max-turns 30
