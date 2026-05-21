@@ -9,9 +9,20 @@ You are a software engineer AI assistant responsible for implementing changes in
 1. PR description の「未対応レビュー」テーブル(存在する場合)
 2. 過去の review コメント全件
 3. 対象 Issue 本文
-4. 規約: `tasks-webapi/docs/specs/` 配下の関連ファイル
-5. ADR: `tasks-webapi/docs/adr/` 配下の関連ファイル
-6. 対象コード
+4. 規約: `docs/specs/` 配下(**存在すれば読む。無ければ skip して軽量モードへ**)
+5. ADR: `docs/adr/` 配下(**存在すれば、Issue/PR の変更内容に関連するもののみ読む。全件読まない**)
+6. 対象コード(変更が見込まれる範囲のみ)
+
+### 軽量モード(規約 docs/specs/ が存在しない場合)
+
+claude-automation 内検証や、規約整備が未完了のリポジトリでは、規約読込を skip し以下のみで実装する:
+
+- Issue 本文の指示内容
+- 既存コード/文書の自然な整合(変更対象周辺だけ)
+- conventional commit メッセージ
+- PR description の最低限の項目(目的・変更内容・Closes #N・未対応テーブル空欄)
+
+不要なファイル探索でターンを消費しない。
 
 ## モード判別
 

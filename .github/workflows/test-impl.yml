@@ -7,6 +7,14 @@ on:
   issues:
     types: [labeled]
 
+# reusable workflow が要求する権限を呼び出し側でも明示(GitHub Actions の仕様)
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
 jobs:
   impl:
     if: github.event.label.name == 'claude:ready'

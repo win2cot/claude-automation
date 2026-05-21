@@ -1,7 +1,7 @@
-# SKELETON: 実装 Claude(Issue → PR 作成)を起動する reusable workflow
-# 利用者リポジトリ(tasks-webapi 等)から uses: で呼ばれる
+# 実装 Claude が Issue を解析し、ブランチ作成 → 実装 → PR open(draft → ready)する reusable workflow
+# 認証: CLAUDE_IMPL App + CLAUDE_CODE_OAUTH_TOKEN(Claude Max プラン枠)
 #
-# 起動例(利用者側):
+# 起動例(利用者側 / 本リポの test-impl.yml も同様):
 #   on:
 #     issues:
 #       types: [labeled]
@@ -17,13 +17,8 @@ on:
   workflow_call:
     inputs:
       issue_number:
-        description: 'Issue 番号(省略時は github.event から自動取得)'
+        description: 'Issue 番号(省略時は github.event.issue.number を使用)'
         required: false
-        type: string
-      task_type:
-        description: 'task-type ラベル(impl / design)'
-        required: false
-        default: 'impl'
         type: string
     secrets:
       CLAUDE_IMPL_APP_ID:
@@ -41,10 +36,13 @@ jobs:
   impl:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # write 権限が複数必要: contents(コミット)、pull-requests(PR open)、issues(コメント・ラベル)
     permissions:
       contents: write
       pull-requests: write
       issues: write
+      id-token: write
+      actions: read
     steps:
       - name: Generate App token (impl)
         id: app-token
@@ -53,26 +51,77 @@ jobs:
           app-id: ${{ secrets.CLAUDE_IMPL_APP_ID }}
           private-key: ${{ secrets.CLAUDE_IMPL_PRIVATE_KEY }}
 
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
           token: ${{ steps.app-token.outputs.token }}
+          ref: main
           fetch-depth: 0
 
-      # TODO: anthropics/claude-code-action の正式呼び出しに置き換える
-      # 認証: CLAUDE_CODE_OAUTH_TOKEN(Claude Max プラン枠を消費)
-      - name: Run Claude (impl)
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          TASK_TYPE: ${{ inputs.task_type }}
+      # git commit 用に bot identity を設定する
+      - name: Configure git identity (impl bot)
         run: |
-          echo "TODO: anthropics/claude-code-action 呼び出し"
-          echo "Issue: ${{ github.event.issue.number || inputs.issue_number }}"
-          echo "Task type: ${TASK_TYPE}"
-          # 実装時は以下のような呼び出しに置き換える(skeleton では echo のみ):
-          # - uses: anthropics/claude-code-action@v1
-          #   with:
-          #     claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          #     github_token: ${{ steps.app-token.outputs.token }}
-          # system prompt: .github/claude/system-impl.md を読む
+          git config user.name "claude-automation-impl[bot]"
+          git config user.email "${{ secrets.CLAUDE_IMPL_APP_ID }}+claude-automation-impl[bot]@users.noreply.github.com"
+
+      # prompt は workflow file ではなく外部ファイル + 動的組立で生成する(C-1 と同じ理由)
+      - name: Build full prompt
+        id: prompt
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo 'PROMPT<<CLAUDE_PROMPT_EOF'
+            echo "# Context"
+            echo ""
+            echo "- Target: Issue #${ISSUE_NUMBER}"
+            echo "- Event: ${EVENT_NAME}"
+            echo "- Repository: ${REPO}"
+            echo "- Branch convention: claude/impl/issue-${ISSUE_NUMBER}-<short-description>"
+            echo ""
+            echo "# Mode detection"
+            echo ""
+            echo "もし docs/specs/ が存在しなければ **軽量モード** で動作する。"
+            echo "軽量モードでは規約読込を skip し、Issue 本文の指示と既存コード/文書の自然な整合のみで実装する。"
+            echo "不要なファイル探索でターンを消費しない。"
+            echo ""
+            echo "# Instructions (system prompt)"
+            echo ""
+            cat .github/claude/system-impl.md
+            echo ""
+            echo "# 実行手順(必ずこの順で 1 ジョブ完結)"
+            echo ""
+            echo "1. gh issue view \${ISSUE_NUMBER} で Issue 本文を読む"
+            echo "2. 実装方針を Issue にコメント投稿(着手宣言 + 方針サマリ)"
+            echo "3. ブランチ作成: git checkout -b claude/impl/issue-\${ISSUE_NUMBER}-<short>"
+            echo "4. ファイル編集・新規作成(Write / Edit ツール使用)"
+            echo "5. git add -A && git commit -m \"<conventional commit message>\""
+            echo "6. git push -u origin claude/impl/issue-\${ISSUE_NUMBER}-<short>"
+            echo "7. gh pr create --draft --title \"<title>\" --body \"<本文>\" --label task-type:impl"
+            echo "8. gh pr ready <PR番号>"
+            echo ""
+            echo "# 設計分岐検知時"
+            echo ""
+            echo "ADR/規約に無い設計判断、破壊的 API 変更、本番影響大、スコープ拡大などを検知した場合は **作業を止めて** 以下を実行する。PR は作らない。"
+            echo "  gh issue edit \${ISSUE_NUMBER} --add-label needs-human-decision"
+            echo "  gh issue comment \${ISSUE_NUMBER} --body \"## 設計判断が必要です ... @win2cot ジャッジをお願いします\""
+            echo ""
+            echo "# 禁止事項"
+            echo ""
+            echo "- main への直 push"
+            echo "- 自分自身の PR を approve"
+            echo "- 規約 / ADR の新規創出(Issue 合意済みのみ可)"
+            echo 'CLAUDE_PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude Code Action (impl)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          prompt: ${{ steps.prompt.outputs.PROMPT }}
+          claude_args: |
+            --max-turns 40
+            --allowedTools "Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git config:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh pr create:*),Bash(gh pr edit:*),Bash(gh pr ready:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(gh label:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Bash(mkdir:*),Bash(touch:*),Bash(echo:*),Read,Write,Edit,Glob,Grep"
