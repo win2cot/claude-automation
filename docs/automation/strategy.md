@@ -140,6 +140,131 @@ flowchart TD
 
 初期は緩い運用とし、オーバーラップしたら随時このガイドラインを更新する。
 
+## 3.1 reusable workflow の標準実装パターン
+
+C-1 / C-2 で確立したパターン。新しい reusable workflow を作る時は以下のテンプレに従う。詳細な設計判断は `docs/adr/0001-claude-automation-design.md` §2.4.2 参照。
+
+### 標準構造
+
+```yaml
+name: Reusable - Claude <Role>
+
+on:
+  workflow_call:
+    secrets:
+      CLAUDE_<ROLE>_APP_ID: { required: true }
+      CLAUDE_<ROLE>_PRIVATE_KEY: { required: true }
+      CLAUDE_CODE_OAUTH_TOKEN: { required: true }
+
+concurrency:
+  group: claude-<role>-${{ ... }}
+  cancel-in-progress: false
+
+jobs:
+  <role>:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20-30
+    permissions:
+      contents: read or write     # commit するなら write
+      pull-requests: write
+      issues: write
+      id-token: write              # claude-code-action 必須
+      actions: read                # 同上
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with: { app-id: ..., private-key: ... }
+
+      - uses: actions/checkout@v4
+        with: { token: ${{ steps.app-token.outputs.token }}, fetch-depth: 0 }
+
+      # commit する役割(impl)のみ:
+      - name: Configure git identity
+        run: |
+          git config user.name "claude-automation-<role>[bot]"
+          git config user.email "${APP_ID}+claude-automation-<role>[bot]@users.noreply.github.com"
+
+      - name: Build full prompt
+        id: prompt
+        run: |
+          {
+            echo 'PROMPT<<EOF'
+            echo "# Context ..."
+            echo "# Mode detection (軽量モード)..."
+            echo "# Instructions"
+            cat .github/claude/system-<role>.md
+            echo "# 実行手順..."
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          prompt: ${{ steps.prompt.outputs.PROMPT }}
+          allowed_bots: "claude-automation-impl,claude-automation-review"
+          allowed_non_write_users: "claude-automation-impl,claude-automation-review"
+          claude_args: |
+            --max-turns <N>
+            --allowedTools "<役割ごとに最小セット>"
+```
+
+### 呼び出し側 workflow(test-* / 利用者リポジトリ)の必須要件
+
+reusable workflow が要求する permissions の **subset 整合** を取るため、呼び出し側でも同じ permissions ブロックを書く:
+
+```yaml
+on:
+  <event>:
+    types: [...]
+
+permissions:
+  contents: read or write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  <role>:
+    if: <発火条件>
+    uses: ./.github/workflows/reusable-<role>.yml   # lab 内
+    # または:
+    # uses: win2cot/claude-automation/.github/workflows/reusable-<role>.yml@v1
+    secrets: inherit
+```
+
+### `--allowedTools` の最小セット参照
+
+| 用途 | 追加すべき Bash パターン |
+|---|---|
+| 共通(全 role) | `Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Bash(echo:*),Bash(gh api:*),Read,Glob,Grep` |
+| review | `Bash(gh pr view/diff/comment/review/list:*),Bash(gh issue view/comment:*)` |
+| impl(commit する役割) | `Bash(git checkout/add/commit/push/status/diff/log/config:*),Bash(gh pr create/edit/ready:*),Bash(gh issue edit:*),Bash(mkdir:*),Bash(touch:*),Write,Edit` |
+| impl-fix(C-3 で確立予定) | 上記 impl + `Bash(gh pr comment:*)`(対応完了レポート投稿用) |
+
+### 軽量モードの定義
+
+system prompt 内に必ず以下を含める:
+
+```markdown
+### 軽量モード(規約 docs/specs/ が存在しない場合)
+
+claude-automation 内検証や、規約整備が未完了のリポジトリでは、規約読込を skip し以下のみで実装/レビューする:
+- 変更内容そのもの(差分・Issue 本文)
+- 既存コード/文書の自然な整合
+- 不要なファイル探索でターンを消費しない
+```
+
+### 動作確認手順(新 reusable を実装した時)
+
+1. lab 内ダミー Issue / PR で発火
+2. Actions タブで該当 workflow run を確認
+3. **`permission_denials_count` の値を確認**(SDK 出力の result type で見える)
+4. 0 でなければ拒否されたツールを `--allowedTools` に追加して再試行
+5. 完了後、`samples/dummy-app/` 配下を変更するダミー PR で E2E 確認
+
 ## 4. 自動マージ条件
 
 以下を **すべて** 満たすこと:
