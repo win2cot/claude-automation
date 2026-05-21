@@ -20,6 +20,11 @@ on:
         description: 'Issue 番号(省略時は github.event.issue.number を使用)'
         required: false
         type: string
+      prompts_ref:
+        description: 'claude-automation から system prompt を取得する ref(default: v1)'
+        required: false
+        default: 'v1'
+        type: string
     secrets:
       CLAUDE_IMPL_APP_ID:
         required: true
@@ -36,7 +41,6 @@ jobs:
   impl:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # write 権限が複数必要: contents(コミット)、pull-requests(PR open)、issues(コメント・ラベル)
     permissions:
       contents: write
       pull-requests: write
@@ -58,13 +62,21 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      # git commit 用に bot identity を設定する
       - name: Configure git identity (impl bot)
         run: |
           git config user.name "claude-automation-impl[bot]"
           git config user.email "${{ secrets.CLAUDE_IMPL_APP_ID }}+claude-automation-impl[bot]@users.noreply.github.com"
 
-      # prompt は workflow file ではなく外部ファイル + 動的組立で生成する(C-1 と同じ理由)
+      # system prompt は利用者リポジトリにはないため claude-automation から curl で取得する。
+      # claude-automation は public のため認証不要。prompts_ref は default v1。
+      - name: Fetch system prompt from claude-automation
+        env:
+          PROMPTS_REF: ${{ inputs.prompts_ref }}
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/win2cot/claude-automation/${PROMPTS_REF}/.github/claude/system-impl.md" \
+            -o /tmp/system-impl.md
+          test -s /tmp/system-impl.md || { echo "ERROR: system prompt not fetched or empty"; exit 1; }
+
       - name: Build full prompt
         id: prompt
         env:
@@ -89,24 +101,24 @@ jobs:
             echo ""
             echo "# Instructions (system prompt)"
             echo ""
-            cat .github/claude/system-impl.md
+            cat /tmp/system-impl.md
             echo ""
             echo "# 実行手順(必ずこの順で 1 ジョブ完結)"
             echo ""
-            echo "1. gh issue view \${ISSUE_NUMBER} で Issue 本文を読む"
+            echo "1. gh issue view ${ISSUE_NUMBER} で Issue 本文を読む"
             echo "2. 実装方針を Issue にコメント投稿(着手宣言 + 方針サマリ)"
-            echo "3. ブランチ作成: git checkout -b claude/impl/issue-\${ISSUE_NUMBER}-<short>"
+            echo "3. ブランチ作成: git checkout -b claude/impl/issue-${ISSUE_NUMBER}-<short>"
             echo "4. ファイル編集・新規作成(Write / Edit ツール使用)"
-            echo "5. git add -A && git commit -m \"<conventional commit message>\""
-            echo "6. git push -u origin claude/impl/issue-\${ISSUE_NUMBER}-<short>"
-            echo "7. gh pr create --draft --title \"<title>\" --body \"<本文>\" --label task-type:impl"
+            echo "5. git add -A && git commit -m '<conventional commit message>'"
+            echo "6. git push -u origin claude/impl/issue-${ISSUE_NUMBER}-<short>"
+            echo "7. gh pr create --draft --title '<title>' --body '<本文>' --label task-type:impl"
             echo "8. gh pr ready <PR番号>"
             echo ""
             echo "# 設計分岐検知時"
             echo ""
             echo "ADR/規約に無い設計判断、破壊的 API 変更、本番影響大、スコープ拡大などを検知した場合は **作業を止めて** 以下を実行する。PR は作らない。"
-            echo "  gh issue edit \${ISSUE_NUMBER} --add-label needs-human-decision"
-            echo "  gh issue comment \${ISSUE_NUMBER} --body \"## 設計判断が必要です ... @win2cot ジャッジをお願いします\""
+            echo "  gh issue edit ${ISSUE_NUMBER} --add-label needs-human-decision"
+            echo "  gh issue comment ${ISSUE_NUMBER} --body '## 設計判断が必要です ... @win2cot ジャッジをお願いします'"
             echo ""
             echo "# 禁止事項"
             echo ""
