@@ -26,4 +26,6 @@ samples/dummy-app/
 
 ## C-3.1 Test
 
+> Verified: 2026-05-21
+
 2026-05-21 追記。
