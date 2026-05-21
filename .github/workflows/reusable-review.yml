@@ -36,7 +36,6 @@ jobs:
   review:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # claude-code-action@v1 が要求する権限セット(actions:read は CI 結果読み取り、id-token:write は OIDC)
     permissions:
       contents: read
       pull-requests: write
@@ -58,12 +57,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.event.issue.pull_request.head.ref }}
           fetch-depth: 0
 
-      # prompt は workflow file ではなく外部ファイル + 動的組立で生成する。
-      # 理由 1: workflow file の prompt 文字列を変更する PR は Anthropic 側 checksum で
-      #         AI 実行ブロックされるため、workflow file 自体に prompt リテラルを書かない
-      #         (ADR-0001 §2.5 R20)
-      # 理由 2: --append-system-prompt に複数行を渡す claude_args 経由のやり方は
-      #         シェル引数 escape が破綻しやすいため、prompt 入力に統合する
       - name: Build full prompt
         id: prompt
         env:
@@ -81,7 +74,7 @@ jobs:
             echo ""
             echo "# Mode detection"
             echo ""
-            echo "もし \`docs/specs/\` が存在しなければ **軽量モード** で動作する。"
+            echo "もし docs/specs/ が存在しなければ **軽量モード** で動作する。"
             echo "軽量モードでは規約読込を skip し、5 ターン以内に approve または changes_requested で submit すること。"
             echo "不要なファイル探索でターンを消費しない。"
             echo ""
@@ -91,13 +84,11 @@ jobs:
             echo ""
             echo "# 最終出力要件"
             echo ""
-            echo "PR レビューを **必ず submit** すること(comment ではなく review として)。"
-            echo "approve 条件を満たすなら:"
-            echo "  gh pr review ${PR_NUMBER} --approve --body \"<簡潔な所見>\""
-            echo "approve 条件を満たさないなら:"
-            echo "  gh pr review ${PR_NUMBER} --request-changes --body \"<指摘内容>\""
+            echo "PR レビューを必ず submit すること(comment ではなく review として)。"
+            echo "approve 条件を満たすなら: gh pr review ${PR_NUMBER} --approve --body \"<簡潔な所見>\""
+            echo "approve 条件を満たさないなら: gh pr review ${PR_NUMBER} --request-changes --body \"<指摘内容>\""
             echo "実行は Bash ツール経由で行う。他のツールで submit を試みない。"
-            echo "CLAUDE_PROMPT_EOF"
+            echo 'CLAUDE_PROMPT_EOF'
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Claude Code Action (review)
@@ -105,12 +96,13 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
-          # prompt が与えられるため Automation mode で起動する
           prompt: ${{ steps.prompt.outputs.PROMPT }}
-          # allowedTools 明示の理由:
-          # claude-code-action のデフォルト allowedTools は厳しく、レビュー submit に必要な
-          # gh CLI / 基本 file 操作 / 探索系が permission denied になる
-          # (前回 run #26179732782 で permission_denials_count: 23 を観測)
+          # bot 連鎖を許可:
+          # - allowed_bots: checkHumanActor を bypass(impl bot が起こしたイベントでも review 起動)
+          # - allowed_non_write_users: checkWritePermissions を bypass(bot は collaborator でないため必要)
+          # 明示リストで限定(public repo で '*' は外部 bot からの invoke リスクあり)
+          allowed_bots: "claude-automation-impl,claude-automation-review"
+          allowed_non_write_users: "claude-automation-impl,claude-automation-review"
           claude_args: |
             --max-turns 30
             --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh api:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Read,Glob,Grep"
