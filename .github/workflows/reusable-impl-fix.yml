@@ -1,25 +1,17 @@
 # レビュー指摘を受けて実装 Claude が修正する reusable workflow
 # push と「対応完了レポート」コメント投稿を 1 ジョブで完結させる(切断防止)
 # 認証: CLAUDE_IMPL App + CLAUDE_CODE_OAUTH_TOKEN(Claude Max プラン枠)
-#
-# 起動例(利用者側 / 本リポの test-impl-fix.yml も同様):
-#   on:
-#     pull_request_review:
-#       types: [submitted]
-#     pull_request_review_comment:
-#       types: [created]
-#   jobs:
-#     impl-fix:
-#       if: |
-#         (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested') ||
-#         github.event_name == 'pull_request_review_comment'
-#       uses: win2cot/claude-automation/.github/workflows/reusable-impl-fix.yml@v1
-#       secrets: inherit
 
 name: Reusable - Claude Impl Fix
 
 on:
   workflow_call:
+    inputs:
+      prompts_ref:
+        description: 'claude-automation から system prompt を取得する ref(default: v1)'
+        required: false
+        default: 'v1'
+        type: string
     secrets:
       CLAUDE_IMPL_APP_ID:
         required: true
@@ -62,10 +54,16 @@ jobs:
           git config user.name "claude-automation-impl[bot]"
           git config user.email "${{ secrets.CLAUDE_IMPL_APP_ID }}+claude-automation-impl[bot]@users.noreply.github.com"
 
-      # prompt 統合方式(C-1/C-2/C-3 で確立)
-      # マーカーは <sub>signal: claude-impl-done</sub>(! を含まないので bash 履歴展開で
-      # エスケープされない。C-3 初回検証で <!-- ... --> 形式が <\!-- に変換されてマーカー
-      # 検知が失敗した、その対策)
+      # system prompt は利用者リポジトリにはないため claude-automation から curl で取得する。
+      # claude-automation は public のため認証不要。prompts_ref は default v1。
+      - name: Fetch system prompt from claude-automation
+        env:
+          PROMPTS_REF: ${{ inputs.prompts_ref }}
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/win2cot/claude-automation/${PROMPTS_REF}/.github/claude/system-impl.md" \
+            -o /tmp/system-impl.md
+          test -s /tmp/system-impl.md || { echo "ERROR: system prompt not fetched or empty"; exit 1; }
+
       - name: Build full prompt
         id: prompt
         env:
@@ -92,24 +90,19 @@ jobs:
             echo ""
             echo "# Instructions (system prompt)"
             echo ""
-            cat .github/claude/system-impl.md
+            cat /tmp/system-impl.md
             echo ""
             echo "# 実行手順(必ずこの順で 1 ジョブ完結)"
             echo ""
-            echo "1. PR の全レビューコメント取得:"
-            echo "   gh pr view ${PR_NUMBER} --json reviews,comments,body"
+            echo "1. PR の全レビューコメント取得: gh pr view ${PR_NUMBER} --json reviews,comments,body"
             echo "2. 過去の対応完了レポート(コメント本文に signal: claude-impl-done を含むもの)を確認"
             echo "3. PR description 内の「未対応レビュー」テーブルを読む"
             echo "4. 未対応または新規の指摘を特定し、各々について対応するか見送るかを判断"
             echo "5. 修正を実施(Write / Edit ツール使用)"
             echo "6. git add -A && git commit -m '<conventional commit message>'"
             echo "7. git push origin ${PR_HEAD_REF}"
-            echo "8. PR description を更新(未対応テーブルを最新状態に):"
-            echo "   gh pr edit ${PR_NUMBER} --body '<更新後の description 全文>'"
-            echo "9. 対応完了レポートを PR コメントとして投稿(フッターマーカー必須):"
-            echo "   対応完了レポート本文の **最終行** に必ず以下のマーカーを含めること:"
-            echo "     <sub>signal: claude-impl-done</sub>"
-            echo "   投稿コマンド例(--body-file 経由が確実、シェルエスケープ回避):"
+            echo "8. PR description を更新(未対応テーブル最新化): gh pr edit ${PR_NUMBER} --body '<更新後 description 全文>'"
+            echo "9. 対応完了レポートを --body-file 経由で投稿:"
             echo "     printf '%s\\n' '<レポート本文>' '<sub>signal: claude-impl-done</sub>' > /tmp/report.md"
             echo "     gh pr comment ${PR_NUMBER} --body-file /tmp/report.md"
             echo ""
@@ -120,7 +113,7 @@ jobs:
             echo "### 対応サマリ"
             echo "| 指摘 | 内容 | 対応 | コミット |"
             echo "|---|---|---|---|"
-            echo "| (review コメントへのリンク) | (要約) | closed: <対応内容> または declined: <見送り理由> | (SHA) |"
+            echo "| (review コメントへのリンク) | (要約) | closed: <対応> または declined: <理由> | (SHA) |"
             echo ""
             echo "### 未対応テーブルの更新"
             echo "PR description の未対応テーブルを上記に合わせて更新済みです。"
@@ -131,14 +124,14 @@ jobs:
             echo ""
             echo "ADR/規約に無い設計判断、破壊的 API 変更、本番影響大、スコープ拡大、同一指摘の繰り返しを検知した場合は **修正を止めて** 以下を実行する。push は行わない。"
             echo "  gh pr edit ${PR_NUMBER} --add-label needs-human-decision"
-            echo "  gh pr comment ${PR_NUMBER} --body-file <heredoc経由> # 中身: '## 設計判断が必要です ... @win2cot ジャッジをお願いします'"
+            echo "  gh pr comment ${PR_NUMBER} --body-file <heredoc経由>"
             echo ""
             echo "# 禁止事項"
             echo ""
             echo "- main への直 push"
             echo "- 自分自身の PR を approve"
             echo "- 規約 / ADR の新規創出(Issue 合意済みのみ可)"
-            echo "- 対応完了レポートマーカー <sub>signal: claude-impl-done</sub> の省略(これがないと再レビューが起動しない)"
+            echo "- 対応完了レポートマーカー <sub>signal: claude-impl-done</sub> の省略"
             echo 'CLAUDE_PROMPT_EOF'
           } >> "$GITHUB_OUTPUT"
 

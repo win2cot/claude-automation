@@ -1,18 +1,17 @@
 # レビュワ Claude が PR を初回レビュー / 再レビューする reusable workflow
 # 認証: CLAUDE_REVIEW App + CLAUDE_CODE_OAUTH_TOKEN(Claude Max プラン枠)
-# 起動条件は利用者側 workflow で if 制御(例は下記コメント参照)
 #
 # 起動例(利用者側 / 本リポの test-review.yml も同様):
 #   on:
 #     pull_request:
-#       types: [ready_for_review]
+#       types: [opened, ready_for_review]
 #     issue_comment:
 #       types: [created]
 #   jobs:
 #     review:
 #       if: |
-#         github.event_name == 'pull_request' ||
-#         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '<!-- claude:impl-done -->'))
+#         (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+#         (github.event_name == 'issue_comment' && ...)
 #       uses: win2cot/claude-automation/.github/workflows/reusable-review.yml@v1
 #       secrets: inherit
 
@@ -20,6 +19,12 @@ name: Reusable - Claude Review
 
 on:
   workflow_call:
+    inputs:
+      prompts_ref:
+        description: 'claude-automation から system prompt を取得する ref(default: v1)'
+        required: false
+        default: 'v1'
+        type: string
     secrets:
       CLAUDE_REVIEW_APP_ID:
         required: true
@@ -57,6 +62,16 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.event.issue.pull_request.head.ref }}
           fetch-depth: 0
 
+      # system prompt は利用者リポジトリにはないため claude-automation から curl で取得する。
+      # claude-automation は public のため認証不要。prompts_ref は default v1。
+      - name: Fetch system prompt from claude-automation
+        env:
+          PROMPTS_REF: ${{ inputs.prompts_ref }}
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/win2cot/claude-automation/${PROMPTS_REF}/.github/claude/system-review.md" \
+            -o /tmp/system-review.md
+          test -s /tmp/system-review.md || { echo "ERROR: system prompt not fetched or empty"; exit 1; }
+
       - name: Build full prompt
         id: prompt
         env:
@@ -80,13 +95,13 @@ jobs:
             echo ""
             echo "# Instructions (system prompt)"
             echo ""
-            cat .github/claude/system-review.md
+            cat /tmp/system-review.md
             echo ""
             echo "# 最終出力要件"
             echo ""
             echo "PR レビューを必ず submit すること(comment ではなく review として)。"
-            echo "approve 条件を満たすなら: gh pr review ${PR_NUMBER} --approve --body \"<簡潔な所見>\""
-            echo "approve 条件を満たさないなら: gh pr review ${PR_NUMBER} --request-changes --body \"<指摘内容>\""
+            echo "approve 条件を満たすなら: gh pr review ${PR_NUMBER} --approve --body '<簡潔な所見>'"
+            echo "approve 条件を満たさないなら: gh pr review ${PR_NUMBER} --request-changes --body '<指摘内容>'"
             echo "実行は Bash ツール経由で行う。他のツールで submit を試みない。"
             echo 'CLAUDE_PROMPT_EOF'
           } >> "$GITHUB_OUTPUT"
@@ -97,10 +112,6 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
           prompt: ${{ steps.prompt.outputs.PROMPT }}
-          # bot 連鎖を許可:
-          # - allowed_bots: checkHumanActor を bypass(impl bot が起こしたイベントでも review 起動)
-          # - allowed_non_write_users: checkWritePermissions を bypass(bot は collaborator でないため必要)
-          # 明示リストで限定(public repo で '*' は外部 bot からの invoke リスクあり)
           allowed_bots: "claude-automation-impl,claude-automation-review"
           allowed_non_write_users: "claude-automation-impl,claude-automation-review"
           claude_args: |

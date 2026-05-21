@@ -4,7 +4,10 @@ name: Test - Claude Review (lab)
 
 on:
   pull_request:
-    types: [ready_for_review]
+    # opened: 最初から ready で open された PR
+    # ready_for_review: draft → ready 切替
+    # 両方対応することで、PR 作成スタイルに依存せずレビューを起動できる(C-3 / 削除 PR で実証)
+    types: [opened, ready_for_review]
   issue_comment:
     types: [created]
 
@@ -22,8 +25,9 @@ jobs:
     # マーカー検索文字列は signal: claude-impl-done(C-3 で <!-- ... --> 形式が bash 履歴展開で
     # <\!-- にエスケープされて contains が false になった、その対策。詳細は ADR-0001 §2.5)
     # issue_comment は Issue と PR 両方で発火するため、PR コメント限定(github.event.issue.pull_request != null)を付ける
+    # pull_request の起動時は draft 状態を除外(draft で勝手にレビューが走らないように)
     if: |
-      github.event_name == 'pull_request' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, 'signal: claude-impl-done'))
     uses: ./.github/workflows/reusable-review.yml
     secrets: inherit
