@@ -92,7 +92,11 @@ jobs:
             echo "# 最終出力要件"
             echo ""
             echo "PR レビューを **必ず submit** すること(comment ではなく review として)。"
-            echo "approve 条件を満たさなければ changes_requested で submit。"
+            echo "approve 条件を満たすなら:"
+            echo "  gh pr review ${PR_NUMBER} --approve --body \"<簡潔な所見>\""
+            echo "approve 条件を満たさないなら:"
+            echo "  gh pr review ${PR_NUMBER} --request-changes --body \"<指摘内容>\""
+            echo "実行は Bash ツール経由で行う。他のツールで submit を試みない。"
             echo "CLAUDE_PROMPT_EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -103,4 +107,10 @@ jobs:
           github_token: ${{ steps.app-token.outputs.token }}
           # prompt が与えられるため Automation mode で起動する
           prompt: ${{ steps.prompt.outputs.PROMPT }}
-          claude_args: --max-turns 30
+          # allowedTools 明示の理由:
+          # claude-code-action のデフォルト allowedTools は厳しく、レビュー submit に必要な
+          # gh CLI / 基本 file 操作 / 探索系が permission denied になる
+          # (前回 run #26179732782 で permission_denials_count: 23 を観測)
+          claude_args: |
+            --max-turns 30
+            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh api:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Read,Glob,Grep"
