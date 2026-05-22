@@ -208,6 +208,43 @@ GitHub のセキュリティガイドラインでは、サードパーティ Act
 
 (具体的な上限値・検知ロジックは別 ADR / `docs/automation/conventions.md` で定める)
 
+### 2.7.1 シグナル 2 種化(2026-05-22)
+
+#### 背景
+
+PR #196(workflow ファイル削除)で `needs-human-decision` ラベルが過剰に付与された。
+発生シーケンスを分析した結果、claude-code-action が `CLAUDE.md` 等の保護ファイルを
+origin/main から自動 restore する制約により、impl Claude の修正が反映されず、
+レビュワが「指摘の繰り返し」を検知して人を呼ぶ流れになっていた。
+
+#### 採用案: 障壁検知の一般化 + シグナル 2 種化
+
+- impl Claude が「指摘に対応しようとして完遂できない」状態を自己検知して停止する
+- 完遂 / 停止を区別するため、シグナルマーカーを 2 種に分ける
+  - `signal: claude-impl-done` = 完遂(従来通り)
+  - `signal: claude-impl-blocked` = 停止(needs-human-decision とセット)
+
+#### 不採用案
+
+- 案 A(R04 基準厳密化): レビュー側で保護ファイル判定が必要となり、リスト依存が発生
+- 案 B(restore ファイル明示): リスト保持につながり drift リスク
+- 案 C(観察期間): 設計は確定済みなのでスキップ
+
+#### 設計上の根拠: なぜリストを持たないか
+
+claude-code-action の restore 対象は `docs/security.md` に明示されていない。
+Issue [anthropics/claude-code-action#1187](https://github.com/anthropics/claude-code-action/issues/1187)
+(symlink ENOENT)が示すとおり実装は流動的。我々がリストを保持すると action 更新時に
+drift するリスクが大きいため、リストではなく「実際に書き換わったか」を判定する方針を採る。
+
+#### auto-merge / notify-human / review が変更不要な根拠
+
+- review: shim 側の `contains(body, 'signal: claude-impl-done')` フィルタは
+  `claude-impl-blocked` に一致しない。自然にレビュー再発火を抑制
+- auto-merge: blocked パスでは新規 approve が起きないため発火しない
+- notify-human: `needs-human-decision` ラベル付与で発火し、既存の auto-merge
+  disable safety が blocked PR を保護する
+
 ### 2.8 自動マージ
 
 - リポジトリ設定で Allow auto-merge を ON、squash merge を既定とする
