@@ -1,6 +1,6 @@
 # ADR-0002: Claude 自動化フローのステートマシン
 
-- ステータス: Proposed
+- ステータス: Accepted
 - 起票日: 2026-05-25
 - 起票者: win2cot
 - 関連リポジトリ: claude-automation(本リポジトリ), tasks-webapi(利用者)
