@@ -136,8 +136,9 @@ Impl-In-Progress --signal:blocked--> Impl-Blocked
 Impl-In-Progress --workflow 異常終了--> Impl-Aborted
 
 Review-Pending --review 起動--> Review-In-Progress
-Review-In-Progress --approve--> Review-Approved --auto-merge enable--> Auto-Merge-Enabled --CI green + up-to-date--> Merged
-Auto-Merge-Enabled --auto-merge 失敗--> Auto-Merge-Failed
+Review-In-Progress --approve--> Review-Approved
+Review-Approved --auto-merge enable 成功--> Auto-Merge-Enabled --CI green + up-to-date--> Merged
+Review-Approved --auto-merge enable 失敗--> Auto-Merge-Failed
 Review-In-Progress --requested_changes--> Review-RequestedChanges --impl-fix 起動--> Impl-Fix-In-Progress
 Review-In-Progress --workflow 異常終了--> Review-Aborted
 
