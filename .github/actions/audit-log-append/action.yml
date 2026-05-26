@@ -1,0 +1,109 @@
+# 1 audit run の record を audit-log Issue に append する composite action
+#
+# 設計:
+# - SM-15 段階では interface だけ定義(SM-L1 / SM-16 / SM-17 で本格実装時に findings ロジックを詰める)
+# - 副作用ゼロ: gh issue comment 失敗時は warning ログのみ、必ず exit 0
+# - audit GHA(scan/audit 系)の最終 step で呼ぶ
+# - schema_version=1: ADR-0002 §2.7「audit-log Issue の JSON フィールド」参照
+# - 検知ゼロ run(Watchdog-Clear)も毎回残す(watchdog 自体の沈黙検知のため)
+#
+# 関連: SM-15 (#37) / audit-log Issue (#59) / SM-L1 / SM-16 / SM-17
+
+name: audit-log-append
+description: '1 audit run record を audit-log Issue に append(append-only, never close)'
+
+inputs:
+  audit_type:
+    description: 'launch-failure / field-audit / followup-audit'
+    required: true
+  state:
+    description: 'Workflow run outcome enum: Watchdog-Clear / Watchdog-Triggered'
+    required: true
+  scanned_count:
+    description: 'scan 対象件数'
+    required: true
+  findings_json:
+    description: 'findings 配列の JSON 文字列(空配列でも OK)'
+    required: false
+    default: '[]'
+  app_token:
+    description: 'claude-automation repo へ issues:write 可能な App token'
+    required: true
+  audit_log_issue:
+    description: 'audit-log Issue 番号(vars.AUDIT_LOG_ISSUE)'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Append audit record to audit-log Issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.app_token }}
+        AUDIT_TYPE: ${{ inputs.audit_type }}
+        STATE: ${{ inputs.state }}
+        SCANNED_COUNT: ${{ inputs.scanned_count }}
+        FINDINGS_JSON: ${{ inputs.findings_json }}
+        AUDIT_LOG_ISSUE: ${{ inputs.audit_log_issue }}
+        RUN_ID: ${{ github.run_id }}
+        RUN_STARTED_AT: ${{ github.run_started_at }}
+      run: |
+        set +e
+
+        ENDED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        STARTED_EPOCH=$(date -u -d "${RUN_STARTED_AT}" +%s 2>/dev/null || echo 0)
+        ENDED_EPOCH=$(date -u -d "${ENDED_AT}" +%s)
+        if [ "${STARTED_EPOCH}" -gt 0 ]; then
+          DURATION_MS=$(( (ENDED_EPOCH - STARTED_EPOCH) * 1000 ))
+        else
+          DURATION_MS=0
+        fi
+
+        JSON=$(jq -n \
+          --arg run_id "${RUN_ID}" \
+          --arg audit_type "${AUDIT_TYPE}" \
+          --arg state "${STATE}" \
+          --argjson duration_ms "${DURATION_MS}" \
+          --arg started_at "${RUN_STARTED_AT}" \
+          --argjson scanned_count "${SCANNED_COUNT}" \
+          --argjson findings "${FINDINGS_JSON}" \
+          '{
+            schema_version: 1,
+            run_id: $run_id,
+            audit_type: $audit_type,
+            state: $state,
+            duration_ms: $duration_ms,
+            started_at: $started_at,
+            scanned_count: $scanned_count,
+            findings: $findings
+          }')
+
+        FINDINGS_COUNT=$(echo "${FINDINGS_JSON}" | jq 'length' 2>/dev/null || echo 0)
+
+        BODY_FILE=$(mktemp)
+        {
+          echo "## run_id: \`${RUN_ID}\` (audit: ${AUDIT_TYPE})"
+          echo ""
+          echo "| field | value |"
+          echo "|---|---|"
+          echo "| state | \`${STATE}\` |"
+          echo "| audit_type | \`${AUDIT_TYPE}\` |"
+          echo "| duration | ${DURATION_MS} ms |"
+          echo "| started_at | ${RUN_STARTED_AT} |"
+          echo "| scanned_count | ${SCANNED_COUNT} |"
+          echo "| findings_count | ${FINDINGS_COUNT} |"
+          echo ""
+          echo '```json'
+          echo "${JSON}"
+          echo '```'
+        } > "${BODY_FILE}"
+
+        if gh issue comment "${AUDIT_LOG_ISSUE}" \
+            --repo win2cot/claude-automation \
+            --body-file "${BODY_FILE}"; then
+          echo "::notice::audit-log appended (run_id=${RUN_ID}, audit_type=${AUDIT_TYPE}, state=${STATE})"
+        else
+          echo "::warning::audit-log append failed (run_id=${RUN_ID}, audit_type=${AUDIT_TYPE}); continuing"
+        fi
+
+        exit 0

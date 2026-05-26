@@ -54,6 +54,7 @@ jobs:
 
       # メンションコメントを Issue または PR に投稿
       - name: Post mention comment
+        id: post
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           MENTION: ${{ inputs.mention }}
@@ -78,3 +79,41 @@ jobs:
           gh pr merge "${{ github.event.pull_request.number }}" \
             --disable-auto \
             --repo "${{ github.repository }}" || true
+
+      # ===== SM-15: 実行ログ収集(append-only, 副作用ゼロ)=====
+      - name: Detect run state for runs-log
+        id: state
+        if: always()
+        env:
+          POST_OUTCOME: ${{ steps.post.outcome }}
+        run: |
+          if [ "${POST_OUTCOME}" = "success" ]; then
+            STATE="Notify-Posted"
+            REASON=""
+          else
+            STATE="Notify-Failed"
+            REASON="unknown"
+          fi
+          echo "state=${STATE}" >> "$GITHUB_OUTPUT"
+          echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
+          # target_type 判定(issue or pr)
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            echo "target_type=pr" >> "$GITHUB_OUTPUT"
+            echo "target_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "target_type=issue" >> "$GITHUB_OUTPUT"
+            echo "target_number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Append run record to runs-log
+        if: always()
+        uses: ./.github/actions/runs-log-append
+        with:
+          workflow: notify-human
+          state: ${{ steps.state.outputs.state }}
+          target_type: ${{ steps.state.outputs.target_type }}
+          target_number: ${{ steps.state.outputs.target_number }}
+          target_repo: ${{ github.repository }}
+          reason: ${{ steps.state.outputs.reason }}
+          app_token: ${{ steps.app-token.outputs.token }}
+          runs_log_issue: ${{ vars.RUNS_LOG_ISSUE }}

@@ -107,6 +107,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Claude Code Action (review)
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -117,3 +118,56 @@ jobs:
           claude_args: |
             --max-turns 30
             --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh api:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Read,Glob,Grep"
+
+      # ===== SM-15: 実行ログ収集(append-only, 副作用ゼロ)=====
+      - name: Detect run state for runs-log
+        id: state
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+        run: |
+          set +e
+          STATE="Review-Aborted"
+          REASON="unknown"
+
+          # 最新 review の state を見る
+          REVIEW_STATE=$(gh pr view "${PR_NUMBER}" --repo "${REPO}" \
+            --json reviews -q '.reviews | sort_by(.submittedAt) | last | .state' 2>/dev/null || echo "")
+
+          case "${REVIEW_STATE}" in
+            APPROVED)
+              STATE="Review-Approved"
+              REASON=""
+              ;;
+            CHANGES_REQUESTED)
+              STATE="Review-RequestedChanges"
+              REASON=""
+              ;;
+            *)
+              if [ "${CLAUDE_OUTCOME}" = "cancelled" ]; then
+                REASON="cancelled"
+              fi
+              ;;
+          esac
+
+          echo "state=${STATE}" >> "$GITHUB_OUTPUT"
+          echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Append run record to runs-log
+        if: always()
+        uses: ./.github/actions/runs-log-append
+        with:
+          workflow: review
+          state: ${{ steps.state.outputs.state }}
+          target_type: pr
+          target_number: ${{ github.event.pull_request.number || github.event.issue.number }}
+          target_repo: ${{ github.repository }}
+          reason: ${{ steps.state.outputs.reason }}
+          branch_created: 'true'
+          pr_created: 'true'
+          app_token: ${{ steps.app-token.outputs.token }}
+          runs_log_issue: ${{ vars.RUNS_LOG_ISSUE }}
