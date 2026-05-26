@@ -41,10 +41,14 @@ jobs:
     timeout-minutes: 5
     # この workflow はコメント投稿(issues:write)と auto-merge 無効化(pull-requests:write)のみ。
     # contents:write は使わないので付与しない(最小権限原則)。
+    # SM-25: actions:read は付けない。caller (shim) 側に actions:read がない場合
+    # called workflow の job permissions が caller の上限を超えると startup_failure になる。
+    # runs-log-append の gh api fallback は github.run_started_at が空のときのみ発火し、
+    # issues / pull_request labeled event では常に populate されるため fallback は不要
+    # (失敗時も composite 内で `2>/dev/null || echo ""` でガード済み → DURATION_MS=0 で append 継続)。
     permissions:
       issues: write
       pull-requests: write
-      actions: read
     steps:
       - name: Generate App token (impl)
         id: app-token
