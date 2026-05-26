@@ -211,7 +211,7 @@ jobs:
           target_number: ${{ github.event.pull_request.number }}
           target_repo: ${{ github.repository }}
           reason: ${{ steps.state.outputs.reason }}
-          branch_created: 'true'
-          pr_created: 'true'
+          branch_created: 'false'
+          pr_created: 'false'
           app_token: ${{ steps.app-token.outputs.token }}
           runs_log_issue: ${{ vars.RUNS_LOG_ISSUE }}
