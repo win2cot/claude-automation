@@ -188,3 +188,79 @@ Closes #NNN
 - 上限到達時の動作: ラベル付与 + 引き戻し理由コメント(これまでの往復履歴サマリ付き)
 
 具体的な閾値・検知ロジックは別 ADR で最終決定(残課題 R02)。
+
+## 8. 実行ログ収集フォーマット(SM-15)
+
+ADR-0002 §2.7「実行ログ収集 / audit-log の record スキーマ」の実装書き下し。各 reusable workflow の最終 step (`if: always()`) で composite action `.github/actions/runs-log-append` を呼ぶ。
+
+### 8.1 Outcome state enum(impl / impl-fix / review / auto-merge 用)
+
+ADR-0002 §2.3 の値:
+
+- **impl**: `Impl-Done` / `Impl-Blocked` / `Impl-Aborted`
+- **impl-fix**: `Impl-Fix-Done` / `Impl-Fix-Blocked` / `Impl-Fix-Aborted`
+- **review**: `Review-Approved` / `Review-RequestedChanges` / `Review-Aborted`
+- **auto-merge**: `Auto-Merge-Enabled` / `Auto-Merge-Failed`
+
+### 8.2 Workflow run outcome enum(notify-human / audit GHA 用)
+
+ADR-0002 §2.7:
+
+- **notify-human**: `Notify-Posted` / `Notify-Failed`
+- **audit GHA**: `Watchdog-Clear` / `Watchdog-Triggered`
+
+### 8.3 Aborted reason enum(初期セット)
+
+ADR-0002 §2.3 参照。`unknown` をデフォルトとし、観察パターンを積みながら拡張する。
+
+- `max-turns` / `barrier` / `oauth-revoked` / `rate-limit` / `quota-exhausted`
+- `context-overflow` / `output-overflow` / `throttle` / `cancelled` / `unknown`
+
+### 8.4 1 run record の Markdown + JSON ハイブリッド例
+
+````markdown
+## run_id: `26410452890` (impl)
+
+| field | value |
+|---|---|
+| state | `Impl-Aborted` |
+| target | issue win2cot/tasks-webapi#142 |
+| duration | 431876 ms |
+| started_at | 2026-05-25T16:34:00Z |
+| ended_at | 2026-05-25T16:41:12Z |
+| reason | `unknown` |
+| branch_created | false |
+| pr_created | false |
+
+```json
+{
+  "schema_version": 1,
+  "run_id": "26410452890",
+  "workflow": "impl",
+  "target": {"type": "issue", "number": 142, "repo": "win2cot/tasks-webapi"},
+  "state": "Impl-Aborted",
+  "duration_ms": 431876,
+  "started_at": "2026-05-25T16:34:00Z",
+  "ended_at": "2026-05-25T16:41:12Z",
+  "artifacts": {"branch_created": false, "pr_created": false, "commits_pushed": 0, "comments_posted": 0},
+  "reason": "unknown"
+}
+```
+````
+
+### 8.5 集計の使い方
+
+```bash
+gh issue view 57 --repo win2cot/claude-automation --comments \
+  --json comments -q '.comments[].body' \
+  | awk '/```json/{flag=1; next} /```/{flag=0} flag' \
+  | jq -s '.'
+```
+
+### 8.6 設計原則
+
+- **副作用ゼロ**: composite action 内の `gh issue comment` 失敗時は warning のみ、必ず `exit 0`。本流(impl / review 等)に影響を与えない
+- **append-only / never close**: runs-log Issue (#57) / audit-log Issue (#59) は集計のため open 維持
+- **schema_version=1**: フィールド追加は version 据え置き、削除・型変更で +1(ADR-0002 §2.7)
+- **artifacts の v1 範囲**: `branch_created` / `pr_created` のみ実装、`commits_pushed` / `comments_posted` は 0 デフォルト(後付け改善可)
+- **テスト用分離**: runs-log-test Issue (#58) は `test-runs-log-append.yml`(`workflow_dispatch`)経由の composite 単体検証専用

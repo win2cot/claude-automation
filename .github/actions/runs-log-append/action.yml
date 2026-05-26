@@ -1,0 +1,153 @@
+# 1 workflow run の record を runs-log Issue に append する composite action
+#
+# 設計:
+# - 副作用ゼロ: gh issue comment 失敗時は warning ログのみ、必ず exit 0
+# - 各 reusable workflow の最終 step で `if: always()` で呼ぶ
+# - state / reason / num_turns / branch_created / pr_created は呼び出し側 workflow で判定
+# - schema_version=1: ADR-0002 §2.7「実行ログ収集 Issue の JSON フィールド」参照
+#
+# 関連: SM-15 (#37) / runs-log Issue (#57) / runs-log-test Issue (#58)
+
+name: runs-log-append
+description: '1 workflow run record を runs-log Issue に append(append-only, never close)'
+
+inputs:
+  workflow:
+    description: 'impl / impl-fix / review / auto-merge / notify-human'
+    required: true
+  state:
+    description: '§2.3 Outcome state enum or §2.7 Workflow run outcome enum の値'
+    required: true
+  target_type:
+    description: 'issue / pr'
+    required: true
+  target_number:
+    description: 'Issue or PR 番号'
+    required: true
+  target_repo:
+    description: 'github.repository(owner/name)'
+    required: true
+  reason:
+    description: 'Aborted 時の reason enum 値(成功時は空、§2.3 参照)'
+    required: false
+    default: ''
+  num_turns:
+    description: 'Claude 実行 workflow のみ(impl/impl-fix/review)'
+    required: false
+    default: ''
+  branch_created:
+    description: 'true / false'
+    required: false
+    default: 'false'
+  pr_created:
+    description: 'true / false'
+    required: false
+    default: 'false'
+  app_token:
+    description: 'claude-automation repo へ issues:write 可能な App token'
+    required: true
+  runs_log_issue:
+    description: 'runs-log Issue 番号(vars.RUNS_LOG_ISSUE / vars.RUNS_LOG_TEST_ISSUE)'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Append run record to runs-log Issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.app_token }}
+        WORKFLOW: ${{ inputs.workflow }}
+        STATE: ${{ inputs.state }}
+        TARGET_TYPE: ${{ inputs.target_type }}
+        TARGET_NUMBER: ${{ inputs.target_number }}
+        TARGET_REPO: ${{ inputs.target_repo }}
+        REASON: ${{ inputs.reason }}
+        NUM_TURNS: ${{ inputs.num_turns }}
+        BRANCH_CREATED: ${{ inputs.branch_created }}
+        PR_CREATED: ${{ inputs.pr_created }}
+        RUNS_LOG_ISSUE: ${{ inputs.runs_log_issue }}
+        RUN_ID: ${{ github.run_id }}
+        RUN_STARTED_AT: ${{ github.run_started_at }}
+      run: |
+        set +e
+
+        # ISO8601 で ended_at(UTC)
+        ENDED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+        # duration_ms
+        STARTED_EPOCH=$(date -u -d "${RUN_STARTED_AT}" +%s 2>/dev/null || echo 0)
+        ENDED_EPOCH=$(date -u -d "${ENDED_AT}" +%s)
+        if [ "${STARTED_EPOCH}" -gt 0 ]; then
+          DURATION_MS=$(( (ENDED_EPOCH - STARTED_EPOCH) * 1000 ))
+        else
+          DURATION_MS=0
+        fi
+
+        # JSON 組み立て(jq で安全に、空欄フィールドは省略)
+        JSON=$(jq -n \
+          --arg run_id "${RUN_ID}" \
+          --arg workflow "${WORKFLOW}" \
+          --arg target_type "${TARGET_TYPE}" \
+          --argjson target_number "${TARGET_NUMBER}" \
+          --arg target_repo "${TARGET_REPO}" \
+          --arg state "${STATE}" \
+          --argjson duration_ms "${DURATION_MS}" \
+          --arg started_at "${RUN_STARTED_AT}" \
+          --arg ended_at "${ENDED_AT}" \
+          --arg reason "${REASON}" \
+          --arg num_turns "${NUM_TURNS}" \
+          --argjson branch_created "${BRANCH_CREATED}" \
+          --argjson pr_created "${PR_CREATED}" \
+          '{
+            schema_version: 1,
+            run_id: $run_id,
+            workflow: $workflow,
+            target: {type: $target_type, number: $target_number, repo: $target_repo},
+            state: $state,
+            duration_ms: $duration_ms,
+            started_at: $started_at,
+            ended_at: $ended_at,
+            artifacts: {
+              branch_created: $branch_created,
+              pr_created: $pr_created,
+              commits_pushed: 0,
+              comments_posted: 0
+            }
+          }
+          | if $reason != "" then . + {reason: $reason} else . end
+          | if $num_turns != "" then . + {num_turns: ($num_turns | tonumber)} else . end
+          ')
+
+        # Markdown 表 + JSON ブロックのハイブリッド
+        BODY_FILE=$(mktemp)
+        {
+          echo "## run_id: \`${RUN_ID}\` (${WORKFLOW})"
+          echo ""
+          echo "| field | value |"
+          echo "|---|---|"
+          echo "| state | \`${STATE}\` |"
+          echo "| target | ${TARGET_TYPE} ${TARGET_REPO}#${TARGET_NUMBER} |"
+          echo "| duration | ${DURATION_MS} ms |"
+          echo "| started_at | ${RUN_STARTED_AT} |"
+          echo "| ended_at | ${ENDED_AT} |"
+          [ -n "${REASON}" ] && echo "| reason | \`${REASON}\` |"
+          [ -n "${NUM_TURNS}" ] && echo "| num_turns | ${NUM_TURNS} |"
+          echo "| branch_created | ${BRANCH_CREATED} |"
+          echo "| pr_created | ${PR_CREATED} |"
+          echo ""
+          echo '```json'
+          echo "${JSON}"
+          echo '```'
+        } > "${BODY_FILE}"
+
+        # 副作用ゼロ: 失敗しても本流に影響なし
+        if gh issue comment "${RUNS_LOG_ISSUE}" \
+            --repo win2cot/claude-automation \
+            --body-file "${BODY_FILE}"; then
+          echo "::notice::runs-log appended (run_id=${RUN_ID}, workflow=${WORKFLOW}, state=${STATE})"
+        else
+          echo "::warning::runs-log append failed (run_id=${RUN_ID}, workflow=${WORKFLOW}); continuing"
+        fi
+
+        exit 0

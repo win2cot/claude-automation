@@ -45,9 +45,42 @@ jobs:
       # gh pr merge --auto は「条件を満たしたら自動的に merge する」状態を有効化する。
       # 実際の merge は GitHub が approval + CI green + ブランチ保護条件を満たした時に行う。
       - name: Enable auto-merge
+        id: enable
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           gh pr merge ${{ github.event.pull_request.number }} \
             --auto --squash \
             --repo ${{ github.repository }}
+
+      # ===== SM-15: 実行ログ収集(append-only, 副作用ゼロ)=====
+      - name: Detect run state for runs-log
+        id: state
+        if: always()
+        env:
+          ENABLE_OUTCOME: ${{ steps.enable.outcome }}
+        run: |
+          if [ "${ENABLE_OUTCOME}" = "success" ]; then
+            STATE="Auto-Merge-Enabled"
+            REASON=""
+          else
+            STATE="Auto-Merge-Failed"
+            REASON="unknown"
+          fi
+          echo "state=${STATE}" >> "$GITHUB_OUTPUT"
+          echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
+
+      - name: Append run record to runs-log
+        if: always()
+        uses: ./.github/actions/runs-log-append
+        with:
+          workflow: auto-merge
+          state: ${{ steps.state.outputs.state }}
+          target_type: pr
+          target_number: ${{ github.event.pull_request.number }}
+          target_repo: ${{ github.repository }}
+          reason: ${{ steps.state.outputs.reason }}
+          branch_created: 'false'
+          pr_created: 'false'
+          app_token: ${{ steps.app-token.outputs.token }}
+          runs_log_issue: ${{ vars.RUNS_LOG_ISSUE }}

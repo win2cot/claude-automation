@@ -1,0 +1,107 @@
+# composite action runs-log-append の単体検証用 workflow(workflow_dispatch のみ)
+#
+# 用途:
+# - SM-15 merge 後に composite action を最小ペイロードで叩いてデバッグサイクルを短くする
+# - default branch (main) に取り込まれた後、Actions UI または `gh workflow run` で起動
+# - append 先は runs-log-test Issue (#58)、本番 runs-log Issue (#57) とは分離
+#
+# 起動例:
+#   gh workflow run test-runs-log-append.yml \
+#     -f workflow=impl -f state=Impl-Done \
+#     -f target_type=issue -f target_number=37 \
+#     -f num_turns=12 -f branch_created=true -f pr_created=true
+#
+# 関連: SM-15 (#37) / runs-log-test Issue (#58)
+
+name: Test - runs-log-append (composite 単体検証)
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow:
+        description: 'impl / impl-fix / review / auto-merge / notify-human'
+        required: true
+        default: 'impl'
+        type: choice
+        options:
+          - impl
+          - impl-fix
+          - review
+          - auto-merge
+          - notify-human
+      state:
+        description: 'Outcome state enum 値(例: Impl-Done / Impl-Aborted / Review-Approved 等)'
+        required: true
+        default: 'Impl-Done'
+        type: string
+      target_type:
+        description: 'issue / pr'
+        required: true
+        default: 'issue'
+        type: choice
+        options:
+          - issue
+          - pr
+      target_number:
+        description: '対象 Issue or PR 番号'
+        required: true
+        default: '37'
+        type: string
+      reason:
+        description: 'Aborted 時のみ(例: max-turns / unknown)'
+        required: false
+        default: ''
+        type: string
+      num_turns:
+        description: 'Claude 実行 workflow のみ'
+        required: false
+        default: ''
+        type: string
+      branch_created:
+        description: 'true / false'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      pr_created:
+        description: 'true / false'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  test-append:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Checkout (composite action 取得)
+        uses: actions/checkout@v4
+
+      - name: Generate App token (impl)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_IMPL_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_IMPL_PRIVATE_KEY }}
+
+      - name: Append test record to runs-log-test Issue
+        uses: ./.github/actions/runs-log-append
+        with:
+          workflow: ${{ inputs.workflow }}
+          state: ${{ inputs.state }}
+          target_type: ${{ inputs.target_type }}
+          target_number: ${{ inputs.target_number }}
+          target_repo: ${{ github.repository }}
+          reason: ${{ inputs.reason }}
+          num_turns: ${{ inputs.num_turns }}
+          branch_created: ${{ inputs.branch_created }}
+          pr_created: ${{ inputs.pr_created }}
+          app_token: ${{ steps.app-token.outputs.token }}
+          runs_log_issue: ${{ vars.RUNS_LOG_TEST_ISSUE }}

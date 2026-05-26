@@ -129,6 +129,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Claude Code Action (impl)
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -137,3 +138,56 @@ jobs:
           claude_args: |
             --max-turns 40
             --allowedTools "Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git config:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh pr create:*),Bash(gh pr edit:*),Bash(gh pr ready:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(gh label:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Bash(mkdir:*),Bash(touch:*),Bash(echo:*),Read,Write,Edit,Glob,Grep"
+
+      # ===== SM-15: 実行ログ収集(append-only, 副作用ゼロ)=====
+      - name: Detect run state for runs-log
+        id: state
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          REPO: ${{ github.repository }}
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+        run: |
+          set +e
+          STATE="Impl-Aborted"
+          REASON="unknown"
+          PR_CREATED="false"
+          BRANCH_CREATED="false"
+
+          COMMENTS=$(gh issue view "${ISSUE_NUMBER}" --repo "${REPO}" \
+            --json comments -q '.comments[].body' 2>/dev/null || echo "")
+
+          if echo "${COMMENTS}" | grep -q "signal: claude-impl-done"; then
+            STATE="Impl-Done"
+            REASON=""
+            PR_CREATED="true"
+            BRANCH_CREATED="true"
+          elif echo "${COMMENTS}" | grep -q "signal: claude-impl-blocked"; then
+            STATE="Impl-Blocked"
+            REASON=""
+            BRANCH_CREATED="true"
+          elif [ "${CLAUDE_OUTCOME}" = "cancelled" ]; then
+            REASON="cancelled"
+          fi
+
+          echo "state=${STATE}" >> "$GITHUB_OUTPUT"
+          echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
+          echo "branch_created=${BRANCH_CREATED}" >> "$GITHUB_OUTPUT"
+          echo "pr_created=${PR_CREATED}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Append run record to runs-log
+        if: always()
+        uses: ./.github/actions/runs-log-append
+        with:
+          workflow: impl
+          state: ${{ steps.state.outputs.state }}
+          target_type: issue
+          target_number: ${{ github.event.issue.number || inputs.issue_number }}
+          target_repo: ${{ github.repository }}
+          reason: ${{ steps.state.outputs.reason }}
+          branch_created: ${{ steps.state.outputs.branch_created }}
+          pr_created: ${{ steps.state.outputs.pr_created }}
+          app_token: ${{ steps.app-token.outputs.token }}
+          runs_log_issue: ${{ vars.RUNS_LOG_ISSUE }}

@@ -158,6 +158,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Claude Code Action (impl-fix)
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -168,3 +169,49 @@ jobs:
           claude_args: |
             --max-turns 50
             --allowedTools "Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git config:*),Bash(gh pr view:*),Bash(gh pr edit:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Bash(mkdir:*),Bash(touch:*),Bash(echo:*),Bash(printf:*),Read,Write,Edit,Glob,Grep"
+
+      # ===== SM-15: 実行ログ収集(append-only, 副作用ゼロ)=====
+      - name: Detect run state for runs-log
+        id: state
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+        run: |
+          set +e
+          STATE="Impl-Fix-Aborted"
+          REASON="unknown"
+
+          COMMENTS=$(gh pr view "${PR_NUMBER}" --repo "${REPO}" \
+            --json comments -q '.comments[].body' 2>/dev/null || echo "")
+
+          if echo "${COMMENTS}" | grep -q "signal: claude-impl-done"; then
+            STATE="Impl-Fix-Done"
+            REASON=""
+          elif echo "${COMMENTS}" | grep -q "signal: claude-impl-blocked"; then
+            STATE="Impl-Fix-Blocked"
+            REASON=""
+          elif [ "${CLAUDE_OUTCOME}" = "cancelled" ]; then
+            REASON="cancelled"
+          fi
+
+          echo "state=${STATE}" >> "$GITHUB_OUTPUT"
+          echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Append run record to runs-log
+        if: always()
+        uses: ./.github/actions/runs-log-append
+        with:
+          workflow: impl-fix
+          state: ${{ steps.state.outputs.state }}
+          target_type: pr
+          target_number: ${{ github.event.pull_request.number }}
+          target_repo: ${{ github.repository }}
+          reason: ${{ steps.state.outputs.reason }}
+          branch_created: 'false'
+          pr_created: 'false'
+          app_token: ${{ steps.app-token.outputs.token }}
+          runs_log_issue: ${{ vars.RUNS_LOG_ISSUE }}
