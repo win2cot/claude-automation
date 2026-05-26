@@ -203,7 +203,7 @@ jobs:
 
       - name: Append run record to runs-log
         if: always()
-        uses: ./.github/actions/runs-log-append
+        uses: win2cot/claude-automation/.github/actions/runs-log-append@v1
         with:
           workflow: impl-fix
           state: ${{ steps.state.outputs.state }}

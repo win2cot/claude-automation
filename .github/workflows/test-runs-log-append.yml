@@ -93,7 +93,7 @@ jobs:
           private-key: ${{ secrets.CLAUDE_IMPL_PRIVATE_KEY }}
 
       - name: Append test record to runs-log-test Issue
-        uses: ./.github/actions/runs-log-append
+        uses: win2cot/claude-automation/.github/actions/runs-log-append@v1
         with:
           workflow: ${{ inputs.workflow }}
           state: ${{ inputs.state }}
