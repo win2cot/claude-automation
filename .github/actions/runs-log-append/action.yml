@@ -75,8 +75,18 @@ runs:
         # ISO8601 で ended_at(UTC)
         ENDED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-        # duration_ms
-        STARTED_EPOCH=$(date -u -d "${RUN_STARTED_AT}" +%s 2>/dev/null || echo 0)
+        # github.run_started_at が空のケース(workflow_dispatch 等)に備え、gh api でフォールバック取得
+        if [ -z "${RUN_STARTED_AT}" ] && [ -n "${RUN_ID}" ]; then
+          RUN_STARTED_AT=$(gh api "/repos/${TARGET_REPO}/actions/runs/${RUN_ID}" \
+            -q '.run_started_at' 2>/dev/null || echo "")
+        fi
+
+        # duration_ms(RUN_STARTED_AT が parse 可能な ISO8601 のときだけ計算)
+        if [ -n "${RUN_STARTED_AT}" ]; then
+          STARTED_EPOCH=$(date -u -d "${RUN_STARTED_AT}" +%s 2>/dev/null || echo 0)
+        else
+          STARTED_EPOCH=0
+        fi
         ENDED_EPOCH=$(date -u -d "${ENDED_AT}" +%s)
         if [ "${STARTED_EPOCH}" -gt 0 ]; then
           DURATION_MS=$(( (ENDED_EPOCH - STARTED_EPOCH) * 1000 ))
