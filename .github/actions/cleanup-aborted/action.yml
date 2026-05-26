@@ -1,0 +1,161 @@
+# Impl / Impl-Fix / Review workflow が Aborted で着地した時の cleanup composite
+#
+# 設計:
+# - 副作用ゼロ: すべての操作は `|| true` + 最終 `exit 0`、本流に影響を与えない
+# - `state` が `*-Aborted` の時だけ動作。それ以外(Done/Blocked/Approved/RequestedChanges)はノーオペ
+# - target(Issue or PR)の bot 最新コメントを編集して abort 通知を追記。
+#   コメントが無ければ新規コメント投稿に fallback(impl-fix / review の早期死亡で着手前コメント
+#   が無いケース)
+# - label 整理: impl は `claude:ready` 除去 + `needs-human-decision` 付与、
+#   impl-fix / review は `needs-human-decision` のみ付与
+#
+# 関連: SM-14 (#38) / ADR-0002 §2.4 不正遷移表「Impl-Aborted 後の宙ぶらりん」抑止
+# MVP スコープ: 早期死亡(branch 未到達)パターン主眼。中途 / 末期死亡パターンは将来拡張
+
+name: cleanup-aborted
+description: 'Impl/Impl-Fix/Review が異常終了した時の着手コメント通知 + ラベル整理(副作用ゼロ)'
+
+inputs:
+  workflow:
+    description: 'impl / impl-fix / review のいずれか'
+    required: true
+  target_type:
+    description: 'issue / pr'
+    required: true
+  target_number:
+    description: 'Issue or PR 番号'
+    required: true
+  target_repo:
+    description: 'github.repository(owner/name)'
+    required: true
+  state:
+    description: '§2.3 Outcome state(例: Impl-Aborted / Impl-Fix-Aborted / Review-Aborted)。'
+    required: true
+  reason:
+    description: 'Aborted 理由(max-turns / denial-loop / cancelled / unknown 等)'
+    required: false
+    default: 'unknown'
+  bot_login:
+    description: '着手宣言コメントを posted した bot の login(claude-automation-impl[bot] 等)'
+    required: true
+  app_token:
+    description: 'target repo へ issues:write / pull-requests:write 可能な App token'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Cleanup aborted run
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.app_token }}
+        WORKFLOW: ${{ inputs.workflow }}
+        TARGET_TYPE: ${{ inputs.target_type }}
+        TARGET_NUMBER: ${{ inputs.target_number }}
+        TARGET_REPO: ${{ inputs.target_repo }}
+        STATE: ${{ inputs.state }}
+        REASON: ${{ inputs.reason }}
+        BOT_LOGIN: ${{ inputs.bot_login }}
+        RUN_ID: ${{ github.run_id }}
+        SERVER_URL: ${{ github.server_url }}
+      run: |
+        set +e
+
+        # state が *-Aborted の時だけ動作(他は何もしない)
+        case "${STATE}" in
+          *Aborted*) ;;
+          *)
+            echo "::notice::cleanup-aborted: state=${STATE} is not aborted, skipping"
+            exit 0
+            ;;
+        esac
+
+        RUN_URL="${SERVER_URL}/${TARGET_REPO}/actions/runs/${RUN_ID}"
+
+        # =====================================================================
+        # 1. 通知本文の組み立て
+        # =====================================================================
+        NOTICE_FILE=$(mktemp)
+        {
+          echo ""
+          echo "---"
+          echo ""
+          echo "## ⚠️ ${WORKFLOW} workflow が異常終了しました"
+          echo ""
+          echo "| field | value |"
+          echo "|---|---|"
+          echo "| state | \`${STATE}\` |"
+          echo "| reason | \`${REASON}\` |"
+          echo "| run | ${RUN_URL} |"
+          echo ""
+          echo "@win2cot 人手対応をお願いします。"
+          echo ""
+          echo "<sub>signal: claude-automation-cleanup</sub>"
+        } > "${NOTICE_FILE}"
+
+        # =====================================================================
+        # 2. bot 最新コメントを取得 → あれば編集追記、無ければ新規コメント投稿
+        #    /repos/.../issues/{N}/comments は Issue / PR 共通エンドポイント
+        # =====================================================================
+        LATEST_BOT_COMMENT_ID=$(gh api \
+          "/repos/${TARGET_REPO}/issues/${TARGET_NUMBER}/comments?per_page=100" \
+          --jq "[.[] | select(.user.login == \"${BOT_LOGIN}\")] | sort_by(.created_at) | last | .id" \
+          2>/dev/null)
+
+        if [ -n "${LATEST_BOT_COMMENT_ID}" ] && [ "${LATEST_BOT_COMMENT_ID}" != "null" ]; then
+          # 既存コメント本文を取得して末尾に通知を追記
+          EXISTING_BODY=$(gh api "/repos/${TARGET_REPO}/issues/comments/${LATEST_BOT_COMMENT_ID}" \
+            --jq '.body' 2>/dev/null)
+
+          # 二重追記防止: 既に cleanup シグナルがあれば編集 skip
+          if echo "${EXISTING_BODY}" | grep -q "signal: claude-automation-cleanup"; then
+            echo "::notice::cleanup-aborted: comment ${LATEST_BOT_COMMENT_ID} already has cleanup signal, skipping edit"
+          else
+            COMBINED_FILE=$(mktemp)
+            { echo "${EXISTING_BODY}"; cat "${NOTICE_FILE}"; } > "${COMBINED_FILE}"
+
+            if gh api -X PATCH "/repos/${TARGET_REPO}/issues/comments/${LATEST_BOT_COMMENT_ID}" \
+                -F body="@${COMBINED_FILE}" >/dev/null 2>&1; then
+              echo "::notice::cleanup-aborted: edited bot comment ${LATEST_BOT_COMMENT_ID} with abort notice"
+            else
+              echo "::warning::cleanup-aborted: failed to edit comment ${LATEST_BOT_COMMENT_ID}, falling back to new comment"
+              gh ${TARGET_TYPE} comment "${TARGET_NUMBER}" \
+                --repo "${TARGET_REPO}" \
+                --body-file "${NOTICE_FILE}" \
+                && echo "::notice::cleanup-aborted: posted new comment as fallback" \
+                || echo "::warning::cleanup-aborted: also failed to post new comment"
+            fi
+          fi
+        else
+          # bot コメントが見つからない: 早期死亡で何も投稿していないか、impl-fix / review で
+          # 着手前コメント省略のパターン。新規コメント投稿で通知
+          if gh ${TARGET_TYPE} comment "${TARGET_NUMBER}" \
+              --repo "${TARGET_REPO}" \
+              --body-file "${NOTICE_FILE}"; then
+            echo "::notice::cleanup-aborted: posted new comment (no prior bot comment found)"
+          else
+            echo "::warning::cleanup-aborted: failed to post new comment"
+          fi
+        fi
+
+        # =====================================================================
+        # 3. label 整理
+        #    impl: claude:ready 除去 + needs-human-decision 付与(再起動防止 + 人を呼ぶ)
+        #    impl-fix / review: needs-human-decision のみ付与
+        # =====================================================================
+        if [ "${WORKFLOW}" = "impl" ]; then
+          gh ${TARGET_TYPE} edit "${TARGET_NUMBER}" \
+            --repo "${TARGET_REPO}" \
+            --remove-label "claude:ready" \
+            --add-label "needs-human-decision" \
+            && echo "::notice::cleanup-aborted: removed claude:ready, added needs-human-decision on ${TARGET_TYPE} #${TARGET_NUMBER}" \
+            || echo "::warning::cleanup-aborted: label management failed (impl)"
+        else
+          gh ${TARGET_TYPE} edit "${TARGET_NUMBER}" \
+            --repo "${TARGET_REPO}" \
+            --add-label "needs-human-decision" \
+            && echo "::notice::cleanup-aborted: added needs-human-decision on ${TARGET_TYPE} #${TARGET_NUMBER}" \
+            || echo "::warning::cleanup-aborted: label management failed (${WORKFLOW})"
+        fi
+
+        exit 0
