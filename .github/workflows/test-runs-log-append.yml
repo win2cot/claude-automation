@@ -80,6 +80,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       issues: write
+      actions: read
     steps:
       - name: Checkout (composite action 取得)
         uses: actions/checkout@v4
