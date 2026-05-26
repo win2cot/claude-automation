@@ -202,15 +202,12 @@ jobs:
           exit 0
 
       # ===== SM-14: Aborted 後処理(needs-human-decision 付与 + コメント通知)=====
-      # NOTE(SM-14): composite ref は当面 relative path。SM-15 PR #60→#62 と同じ
-      # 2 段構成で、本 PR merge + v1 retag の後に absolute path
-      # (win2cot/claude-automation/.github/actions/cleanup-aborted@v1)へ follow-up PR で
-      # 切り替える。GitHub Actions は uses: を job setup 段階で pre-resolve するため、
-      # 「@v1 に新規 action 未配布の過渡期」を step-level if gate では救えない。
-      # 本 PR 自身の lab test を通すために relative を選択。
+      # state が *-Aborted を含む時のみ実行(composite 内にも同じ check あり、
+      # defense-in-depth)。cross-repo 配信のため absolute path で composite を参照
+      # ([[reference-reusable-workflow-uses]])。
       - name: Cleanup aborted run
         if: always() && contains(steps.state.outputs.state, 'Aborted')
-        uses: ./.github/actions/cleanup-aborted
+        uses: win2cot/claude-automation/.github/actions/cleanup-aborted@v1
         with:
           workflow: impl-fix
           target_type: pr
