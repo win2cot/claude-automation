@@ -47,10 +47,104 @@ jobs:
           app-id: ${{ secrets.CLAUDE_REVIEW_APP_ID }}
           private-key: ${{ secrets.CLAUDE_REVIEW_PRIVATE_KEY }}
 
+      # ===== SM-10: out-of-date branch 自動 update(ADR-0002 §2.4 不正遷移表)=====
+      # `mergeable_state: behind` を検知したら `PUT /pulls/{number}/update-branch` を呼出。
+      # 成功時は新 SHA で CI 再走 + re-review → 新 run で auto-merge enable に乗るため、
+      # 本 run の `Enable auto-merge` は skip(古い SHA での二重 enable を避ける、A 案)。
+      # `unknown` は GitHub 側の非同期計算未完了なので 1 回だけ retry、それでも unknown は fail-open。
+      - name: Detect out-of-date with base branch (SM-10)
+        id: detect_outdated
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          MS=$(gh api "repos/${REPO}/pulls/${PR_NUM}" --jq '.mergeable_state' 2>/dev/null || echo "unknown")
+
+          if [ "${MS}" = "unknown" ]; then
+            echo "::warning::mergeable_state=unknown, sleep 2s and retry (SM-10)"
+            sleep 2
+            MS=$(gh api "repos/${REPO}/pulls/${PR_NUM}" --jq '.mergeable_state' 2>/dev/null || echo "unknown")
+          fi
+
+          echo "mergeable_state=${MS}" >> "$GITHUB_OUTPUT"
+
+          if [ "${MS}" = "behind" ]; then
+            echo "behind=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::PR #${PR_NUM} is behind base branch, will trigger update-branch (SM-10)"
+          else
+            echo "behind=false" >> "$GITHUB_OUTPUT"
+            if [ "${MS}" = "unknown" ]; then
+              echo "::warning::mergeable_state=unknown after retry, fail-open: enable に進む (SM-10)"
+            fi
+          fi
+
+      - name: Auto-update branch (SM-10)
+        id: auto_update
+        if: steps.detect_outdated.outputs.behind == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set +e
+          ERR_FILE=$(mktemp)
+          gh api -X PUT "repos/${REPO}/pulls/${PR_NUM}/update-branch" > /dev/null 2> "${ERR_FILE}"
+          RC=$?
+          set -e
+
+          if [ "${RC}" -eq 0 ]; then
+            echo "update_outcome=success" >> "$GITHUB_OUTPUT"
+            echo "::notice::update-branch 成功、本 run は enable を skip、新 SHA workflow run で auto-merge enable される (SM-10)"
+          else
+            echo "update_outcome=failure" >> "$GITHUB_OUTPUT"
+            ERR_MSG=$(cat "${ERR_FILE}" | head -c 500)
+            echo "update_error<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${ERR_MSG}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+            echo "::error::update-branch 呼出が失敗 (SM-10): ${ERR_MSG}"
+          fi
+
+      - name: Notify Auto-Update-Failed (SM-10)
+        if: steps.auto_update.outputs.update_outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          UPDATE_ERR: ${{ steps.auto_update.outputs.update_error }}
+        run: |
+          # PR ラベル付与は `pull-requests: write` で完結する `gh pr edit` を使用
+          # (`gh issue edit` だと issues スコープが必要で、SM-25 caller subset 整合違反の懸念)
+          gh pr edit "${PR_NUM}" --add-label "needs-human-decision" --repo "${REPO}" || true
+
+          BODY_FILE=$(mktemp)
+          {
+            echo "@win2cot SM-10 auto-update branch が失敗しました。"
+            echo ""
+            echo "- **PR**: #${PR_NUM}"
+            echo "- **失敗 step**: \`PUT /repos/${REPO}/pulls/${PR_NUM}/update-branch\` が HTTP 4xx/5xx"
+            echo "- **エラー出力(先頭 500 文字)**: "
+            echo ""
+            echo '```'
+            echo "${UPDATE_ERR}"
+            echo '```'
+            echo ""
+            echo "- **run**: ${RUN_URL}"
+            echo "- **対応**: 手動で「Update branch」ボタン押下、conflict の場合は rebase/merge 解決後に再 approve。原因対応後は \`needs-human-decision\` ラベルを外して auto-merge を再起動可能。"
+          } > "${BODY_FILE}"
+
+          gh pr comment "${PR_NUM}" --repo "${REPO}" --body-file "${BODY_FILE}" || true
+
       # gh pr merge --auto は「条件を満たしたら自動的に merge する」状態を有効化する。
       # 実際の merge は GitHub が approval + CI green + ブランチ保護条件を満たした時に行う。
+      #
+      # SM-10: behind 検知時は本 run の enable を skip(成功でも失敗でも)。
+      #   - 成功(Auto-Update-Triggered): 新 SHA workflow run で enable される
+      #   - 失敗(Auto-Update-Failed): needs-human-decision で人手介入
       - name: Enable auto-merge
         id: enable
+        if: steps.detect_outdated.outputs.behind != 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
@@ -59,13 +153,27 @@ jobs:
             --repo ${{ github.repository }}
 
       # ===== SM-15: 実行ログ収集(append-only, 副作用ゼロ)=====
+      # SM-10 で追加: Auto-Update-Triggered / Auto-Update-Failed の 2 state を判定優先。
+      # 判定優先順位:
+      #   1. behind=true AND update_outcome=success → Auto-Update-Triggered
+      #   2. behind=true AND update_outcome=failure → Auto-Update-Failed
+      #   3. enable.outcome=success                 → Auto-Merge-Enabled
+      #   4. それ以外(enable skipped or failed)    → Auto-Merge-Failed
       - name: Detect run state for runs-log
         id: state
         if: always()
         env:
+          BEHIND: ${{ steps.detect_outdated.outputs.behind }}
+          UPDATE_OUTCOME: ${{ steps.auto_update.outputs.update_outcome }}
           ENABLE_OUTCOME: ${{ steps.enable.outcome }}
         run: |
-          if [ "${ENABLE_OUTCOME}" = "success" ]; then
+          if [ "${BEHIND}" = "true" ] && [ "${UPDATE_OUTCOME}" = "success" ]; then
+            STATE="Auto-Update-Triggered"
+            REASON=""
+          elif [ "${BEHIND}" = "true" ] && [ "${UPDATE_OUTCOME}" = "failure" ]; then
+            STATE="Auto-Update-Failed"
+            REASON=""
+          elif [ "${ENABLE_OUTCOME}" = "success" ]; then
             STATE="Auto-Merge-Enabled"
             REASON=""
           else
