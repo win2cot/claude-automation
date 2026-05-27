@@ -44,4 +44,4 @@
 
 - 月間予算の具体値設定(運用 1 ヶ月後)
 - 計測 dashboard の構築
-- アラート自動通知の実装(Slack? GitHub Issue?)
+- アラート自動通知の実装方式(GitHub Issue 集約 + `needs-human-decision` + @win2cot メンションに統一、詳細は ADR-0002 §2.6 通知ポリシー + SM-16 / SM-17 audit GHA で扱う)
