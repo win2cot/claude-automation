@@ -26,8 +26,12 @@ jobs:
     # <\!-- にエスケープされて contains が false になった、その対策。詳細は ADR-0001 §2.5)
     # issue_comment は Issue と PR 両方で発火するため、PR コメント限定(github.event.issue.pull_request != null)を付ける
     # pull_request の起動時は draft 状態を除外(draft で勝手にレビューが走らないように)
+    # SM-01: signal: claude-human-fix-done は人手 fix 後の再レビュー経路。
+    # author_association ∈ {OWNER, MEMBER, COLLABORATOR} で write 権限ユーザに限定し
+    # 任意ユーザのシグナル偽装を防止(ADR-0002 §2.4 不正遷移表 SM-01 行 / §2.8 SM-01 説明)
     if: |
       (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, 'signal: claude-impl-done'))
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, 'signal: claude-impl-done')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, 'signal: claude-human-fix-done') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     uses: ./.github/workflows/reusable-review.yml
     secrets: inherit

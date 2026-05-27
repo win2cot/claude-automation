@@ -2,14 +2,27 @@
 
 両 Claude(実装・レビュワ)が共有する書式とマーカーを定義する。
 
-## 1. シグナルマーカー(2 種)
+## 1. シグナルマーカー(3 種、bot 2 種 + 人手 1 種)
 
-実装 Claude は修正後 push と同一ジョブで PR コメントにシグナルマーカーを含むレポートを投稿する。マーカーは **完遂** と **停止** の 2 種があり、**排他**(同一コメントに両方含めない)。
+実装 Claude(bot)は修正後 push と同一ジョブで PR コメントにシグナルマーカーを含むレポートを投稿する。bot 用マーカーは **完遂** と **停止** の 2 種があり、**排他**(同一コメントに両方含めない)。人手 fix 後の再レビュー要求用に **`claude-human-fix-done`** を 1 種追加(SM-01、ADR-0002 §2.4)。
 
 | マーカー | 意味 | 投稿者 | 受け取り側の動作 |
 |---|---|---|---|
-| `<sub>signal: claude-impl-done</sub>` | 全指摘対応完遂 | 実装 Claude | `reusable-review.yml` が `contains(comment.body, 'signal: claude-impl-done')` で発火 → 再レビュー |
-| `<sub>signal: claude-impl-blocked</sub>` | 障壁検知・停止 | 実装 Claude | review は再発火しない。`needs-human-decision` ラベルにより notify-human が発火 + auto-merge 保険無効 |
+| `<sub>signal: claude-impl-done</sub>` | 全指摘対応完遂 | 実装 Claude(bot) | `reusable-review.yml` が `contains(comment.body, 'signal: claude-impl-done')` で発火 → 再レビュー |
+| `<sub>signal: claude-impl-blocked</sub>` | 障壁検知・停止 | 実装 Claude(bot) | review は再発火しない。`needs-human-decision` ラベルにより notify-human が発火 + auto-merge 保険無効 |
+| `<sub>signal: claude-human-fix-done</sub>` | 人手 fix 完了・再レビュー要求 | write 権限ユーザ(`author_association ∈ {OWNER, MEMBER, COLLABORATOR}`) | `reusable-review.yml` caller の `if:` が `contains(comment.body, 'signal: claude-human-fix-done')` + `author_association` チェックで発火 → 再レビュー(SM-01) |
+
+### 投稿例: 人手 fix 後の再レビュー要求
+
+人手で修正を push したあと、PR コメントに以下のような body を投稿する(投稿は GitHub UI / `gh pr comment` どちらでも可):
+
+```markdown
+レビュー指摘の `validate()` の null チェック漏れを修正しました。コミット abc1234。
+
+<sub>signal: claude-human-fix-done</sub>
+```
+
+`author_association` が `OWNER` / `MEMBER` / `COLLABORATOR` のいずれでもないユーザ(例: 外部 `CONTRIBUTOR`)の投稿では `if:` 条件で偽となり review は起動しない。任意ユーザのシグナル偽装はこれで防止する。
 
 ### 設計判断: なぜ `<!--` を使わないか
 
