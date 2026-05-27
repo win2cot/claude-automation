@@ -163,7 +163,7 @@ watchdog / 通知投稿の結果は PR/Issue 状態に影響しない(`Human-Req
 | 古い `Review-RequestedChanges` 残置 | SM-08 | impl-fix の `signal: claude-impl-done` 投稿時に既存の requested_changes review を `gh api ... /pulls/N/reviews/REVIEW_ID/dismissals` で自動 dismiss |
 | 人手 fix 後の review 再起動経路欠落 | SM-01 | `signal: claude-human-fix-done` を write 権限ユーザ限定で issue_comment trigger 受付 → review 起動。または `re-review` ラベル付与 trigger を追加 |
 | `Review-Approved` だが `out-of-date with base branch` | SM-10 | auto-merge enable 時に out-of-date を検知したら `PUT /repos/{owner}/{repo}/pulls/{number}/update-branch` を自動呼出 |
-| workflow run 自体が起動しない(SM-L1 起動失敗 watchdog) | SM-L1 | watchdog GHA が `claude:ready` 付与から N 分タイムアウトで「対応 workflow run が存在しない」を検出 → `needs-human-decision` + audit-log finding |
+| workflow run 自体が起動しない(SM-L1 起動失敗 watchdog) | SM-L1 | watchdog GHA が `claude:ready` 付与から N 分タイムアウトで「対応 workflow run が存在しない」を検出 → `needs-human-decision` + audit-log finding。**※ 2026-05-27 ROI 再評価で v1.2.0 では実装保留。理由: 未観測の障害カテゴリへの予防装置で、`issues.labeled` 即時 trigger を tasks-webapi に置けない現フェーズ(feedback `tasks_webapi_change_timing`)では cron 単独構成しか取れず、GHA quota コスト(*/30 min で Free tier の ~36%)が user 体感価値(運用者が GitHub を日次確認するため「24h 以上気付かない」が稀)に見合わない。機能要件は本表に維持、Sprint 1(2026-07-14 開始)で実 load 観察後に復活判断。§7 残課題参照** |
 
 #### Tier 1 で明文化のみ(実装は既存の挙動で十分)
 
@@ -350,7 +350,7 @@ findings 要素:
 - **SM-08 requested_changes 自動 dismiss** — impl-fix の `signal: claude-impl-done` 投稿時に古い requested_changes を dismiss
 - **SM-01 人力修正の再レビュー経路** — `signal: claude-human-fix-done` または `re-review` ラベル trigger を追加
 - **SM-10 out-of-date branch 自動 update** — auto-merge enable 時に out-of-date を自動 update
-- **SM-L1 起動失敗 watchdog** — `claude:ready` 付与から N 分タイムアウトで workflow run 不在を検出
+- **SM-L1 起動失敗 watchdog** — `claude:ready` 付与から N 分タイムアウトで workflow run 不在を検出(**2026-05-27 v1.2.0 不採用 / 保留、Sprint 1 後再評価。詳細は §2.4 表注釈・§7 残課題参照**)
 - **SM-02 impl-fix checkout 認証エラー対応** — 前提条件を崩す事象として ADR 内 Tier 1 で扱う。`actions/checkout` の `token` 引数 + 人手 PR 拾い時の fallback 設計
 
 #### ADR の外側(独立 PR、ステートマシン準拠だが ADR で定義不要)
@@ -463,7 +463,7 @@ SM 番号は本 ADR 内のローカル識別子であり、派生実装の Issue
 - **SM-13 field 不整合**: テスト用 Issue を「不適用」field で起票 → `claude:ready` 付与 → workflow 早期 exit + キャンセル理由コメント + ラベル除去を確認
 - **SM-08 requested_changes dismiss**: ローカル sample app PR で意図的に requested_changes → impl-fix → 古い review が dismiss されることを確認
 - **SM-10 auto-update branch**: out-of-date PR を作って approve、自動 update が走り CI 再走 → auto-merge へ
-- **SM-L1 watchdog**: `claude:ready` 付与だが workflow が起動しない条件(短期は手動で workflow disable)を作って watchdog 検出を確認
+- **SM-L1 watchdog**: `claude:ready` 付与だが workflow が起動しない条件(短期は手動で workflow disable)を作って watchdog 検出を確認(**v1.2.0 では未着手、SM-L1 復活 PR 時にこの検証手順を実施**)
 - **SM-02 impl-fix checkout**: 人手 PR で意図的に impl-fix を起動 → token scope が正しく動作するか確認
 
 各派生実装の検証手順は派生 PR 内で書き下す。本 ADR としては「派生実装で必ず検証手順を明示する」ことを規約とする。
@@ -490,3 +490,4 @@ SM 番号は本 ADR 内のローカル識別子であり、派生実装の Issue
 - **v1.2.0 release notes 構成**: 派生実装 PR を段階 release するか、まとめて v1.2.0 タグするかを Step 12 程度の時点で判断
 - **ADR-0001 §2.7 「ラリー上限」「同一指摘検知」の本 ADR への取込判断**: R02(ラリー上限)/ R04(設計分岐判定基準)は ADR-0001 残課題として残置されている。本 ADR の Tier 1 派生実装と連動する可能性があるので、SM-04 max-turns 増の効果測定後に再評価
 - **memory 内の旧記号 rename**: project_claude_automation.md ほか memory 全般の旧記号 `(a)`〜`(s)` / `(L-α/β/γ)` を本 ADR の SM 番号に揃える作業。ADR merge とは別タイミングで実施
+- **SM-L1 起動失敗 watchdog の復活判断**: 2026-05-27 ROI 再評価で v1.2.0 不採用 / 保留。再評価条件 = Sprint 1(2026-07-14 開始)以降の実 load 観察で「workflow run 自体が起動しない」障害が 1 件以上観測されたら SM-L1 復活 PR を起票、観測されなければ v1.3.0 以降または不採用判断。判断時の参照 Issue は #39(保留 close 済み)、復活時は新規 Issue として再起票
