@@ -201,6 +201,62 @@ jobs:
           echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           exit 0
 
+      # ===== SM-08: requested_changes 自動 dismiss(Impl-Fix-Done 限定)=====
+      # state が Impl-Fix-Done(= signal: claude-impl-done 投稿済)の時のみ、
+      # 同 PR の active な CHANGES_REQUESTED review を全件 dismiss する。
+      # 「active」の判定は GitHub の review semantics(同一 reviewer の最新 review
+      # のみが mergeability に影響)に従い、reviewer ごとの最新 review が
+      # CHANGES_REQUESTED のもの全部を対象にする(ADR-0002 §2.4 表)。
+      # 失敗時は ::warning:: で workflow log に残すのみ、`needs-human-decision`
+      # は付与しない(re-review で上書きされるため非クリティカル、ADR-0002 §2.6)。
+      - name: Dismiss stale requested_changes reviews (SM-08)
+        if: always() && steps.state.outputs.state == 'Impl-Fix-Done'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          DONE_SHA: ${{ github.sha }}
+        run: |
+          set +e
+          REVIEWS=$(gh api "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" --paginate 2>&1)
+          RC=$?
+          if [ $RC -ne 0 ]; then
+            echo "::warning::SM-08: review 一覧取得失敗 (exit ${RC}): ${REVIEWS}"
+            exit 0
+          fi
+
+          TARGETS=$(echo "${REVIEWS}" | jq -r '
+            group_by(.user.login)
+            | map(max_by(.submitted_at))
+            | map(select(.state == "CHANGES_REQUESTED"))
+            | .[].id
+          ' 2>/dev/null)
+
+          if [ -z "${TARGETS}" ]; then
+            echo "SM-08: active な CHANGES_REQUESTED なし、dismiss 不要"
+            exit 0
+          fi
+
+          MESSAGE="impl-fix で対応完了 (signal: claude-impl-done 投稿、commit ${DONE_SHA})"
+          FAILED=0
+          for REVIEW_ID in ${TARGETS}; do
+            echo "SM-08: dismiss review ${REVIEW_ID}"
+            OUT=$(gh api -X PUT \
+              "/repos/${REPO}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}/dismissals" \
+              -f message="${MESSAGE}" 2>&1)
+            RC=$?
+            if [ ${RC} -ne 0 ]; then
+              echo "::warning::SM-08: dismiss 失敗 review ${REVIEW_ID} (exit ${RC}): ${OUT}"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          if [ ${FAILED} -gt 0 ]; then
+            echo "::warning::SM-08: ${FAILED} 件の dismiss が失敗。re-review で上書きされるため非クリティカル、人手介入は呼ばない"
+          fi
+          exit 0
+
       # ===== SM-14: Aborted 後処理(needs-human-decision 付与 + コメント通知)=====
       # state が *-Aborted を含む時のみ実行(composite 内にも同じ check あり、
       # defense-in-depth)。cross-repo 配信のため absolute path で composite を参照
