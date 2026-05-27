@@ -200,7 +200,9 @@ ADR-0002 §2.3 の値:
 - **impl**: `Impl-Done` / `Impl-Blocked` / `Impl-Aborted`
 - **impl-fix**: `Impl-Fix-Done` / `Impl-Fix-Blocked` / `Impl-Fix-Aborted`
 - **review**: `Review-Approved` / `Review-RequestedChanges` / `Review-Aborted`
-- **auto-merge**: `Auto-Merge-Enabled` / `Auto-Merge-Failed`
+- **auto-merge**: `Auto-Merge-Enabled` / `Auto-Merge-Failed` / `Auto-Update-Triggered` / `Auto-Update-Failed`
+    - `Auto-Update-Triggered` = SM-10 で `mergeable_state: behind` を検知し `PUT /pulls/{number}/update-branch` 成功(本 run は `gh pr merge --auto` を skip & exit、新 SHA の workflow run で `Auto-Merge-Enabled` に乗る)
+    - `Auto-Update-Failed` = SM-10 の `update-branch` 呼出が HTTP 4xx/5xx で失敗(`needs-human-decision` 付与 + `@win2cot` メンション)
 
 ### 8.2 Workflow run outcome enum(notify-human / audit GHA 用)
 
