@@ -162,6 +162,45 @@ jobs:
           COMMENTS=$(gh issue view "${ISSUE_NUMBER}" --repo "${REPO}" \
             --json comments -q '.comments[].body' 2>/dev/null || echo "")
 
+          # ===== SM-14c: PR 実態確認(signal 不在時の false positive 抑止)=====
+          # claude-impl が作る branch は "claude/impl/issue-${N}-${slug}" 規則
+          # PR 特定軸 = branch prefix + bot author + same-repo の AND
+          # 同一 SHA 複数 PR → 最新 number を採用、fork PR は除外、
+          # merged 後 branch 自動削除に備え state=all で検索
+          PR_LIST_JSON=$(gh pr list --repo "${REPO}" --state all --limit 30 \
+            --json number,isDraft,state,headRefName,headRepository,author \
+            2>/dev/null || echo "[]")
+
+          # author.login は API 経由 / gh CLI 版で "[bot]" 接尾辞の有無があるので両方受ける
+          PR_MATCH=$(echo "${PR_LIST_JSON}" | jq -c \
+            --arg n "${ISSUE_NUMBER}" \
+            --arg repo "${REPO}" '
+            [.[]
+              | select(.headRefName | startswith("claude/impl/issue-" + $n + "-")
+                                       or . == "claude/impl/issue-" + $n)
+              | select(.headRepository.nameWithOwner == $repo)
+              | select(.author.login == "claude-automation-impl"
+                       or .author.login == "claude-automation-impl[bot]"
+                       or .author.login == "app/claude-automation-impl")
+            ] | sort_by(.number) | last // empty' 2>/dev/null || echo "")
+
+          PR_IS_DONE="false"
+          if [ -n "${PR_MATCH}" ] && [ "${PR_MATCH}" != "null" ]; then
+            PR_NUMBER=$(echo "${PR_MATCH}" | jq -r '.number')
+            IS_DRAFT=$(echo "${PR_MATCH}" | jq -r '.isDraft')
+            PR_STATE=$(echo "${PR_MATCH}" | jq -r '.state')
+            echo "Found impl PR #${PR_NUMBER} (isDraft=${IS_DRAFT}, state=${PR_STATE})"
+            BRANCH_CREATED="true"
+            if [ "${IS_DRAFT}" = "false" ] \
+               && { [ "${PR_STATE}" = "OPEN" ] || [ "${PR_STATE}" = "MERGED" ]; }; then
+              PR_IS_DONE="true"
+              PR_CREATED="true"
+            fi
+          else
+            echo "No impl PR found for issue #${ISSUE_NUMBER}"
+          fi
+
+          # ===== 状態判定(signal 優先 → PR 実態 → cancelled → defensive default)=====
           if echo "${COMMENTS}" | grep -q "signal: claude-impl-done"; then
             STATE="Impl-Done"
             REASON=""
@@ -171,6 +210,10 @@ jobs:
             STATE="Impl-Blocked"
             REASON=""
             BRANCH_CREATED="true"
+          elif [ "${PR_IS_DONE}" = "true" ]; then
+            # SM-14c: signal 不在だが PR 完遂状態 → false positive を回避
+            STATE="Impl-Done"
+            REASON="signal-missing"
           elif [ "${CLAUDE_OUTCOME}" = "cancelled" ]; then
             REASON="cancelled"
           fi

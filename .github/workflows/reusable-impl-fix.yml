@@ -161,6 +161,23 @@ jobs:
             echo 'CLAUDE_PROMPT_EOF'
           } >> "$GITHUB_OUTPUT"
 
+      # ===== SM-14c: claude 実行前の PR head SHA を捕捉 =====
+      # 終了時の head SHA と比較して「run 中に新 commit が push されたか」を判定。
+      # signal 不在でも新 commit + non-draft なら false positive を抑止して Done 扱い。
+      - name: Capture PR head SHA before claude run
+        id: pre_head
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set +e
+          PRE_SHA=$(gh pr view "${PR_NUMBER}" --repo "${REPO}" \
+            --json headRefOid -q '.headRefOid' 2>/dev/null || echo "")
+          echo "Pre-claude PR head SHA: ${PRE_SHA}"
+          echo "pre_head_sha=${PRE_SHA}" >> "$GITHUB_OUTPUT"
+          exit 0
+
       - name: Run Claude Code Action (impl-fix)
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -183,6 +200,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+          PRE_HEAD_SHA: ${{ steps.pre_head.outputs.pre_head_sha }}
         run: |
           set +e
           STATE="Impl-Fix-Aborted"
@@ -191,12 +209,32 @@ jobs:
           COMMENTS=$(gh pr view "${PR_NUMBER}" --repo "${REPO}" \
             --json comments -q '.comments[].body' 2>/dev/null || echo "")
 
+          # ===== SM-14c: PR 状態実態確認(signal 不在時の false positive 抑止)=====
+          # impl-fix の成功シグナル = run 中に PR head に新 commit が積まれた
+          # + non-draft 維持。draft 復帰時は state 遷移を起こさず防御 default に戻る
+          POST_SHA=$(gh pr view "${PR_NUMBER}" --repo "${REPO}" \
+            --json headRefOid -q '.headRefOid' 2>/dev/null || echo "")
+          IS_DRAFT=$(gh pr view "${PR_NUMBER}" --repo "${REPO}" \
+            --json isDraft -q '.isDraft' 2>/dev/null || echo "true")
+          PR_HAS_NEW_COMMIT="false"
+          if [ -n "${PRE_HEAD_SHA}" ] && [ -n "${POST_SHA}" ] \
+             && [ "${PRE_HEAD_SHA}" != "${POST_SHA}" ]; then
+            PR_HAS_NEW_COMMIT="true"
+            echo "PR head SHA changed: ${PRE_HEAD_SHA} -> ${POST_SHA}"
+          else
+            echo "PR head SHA unchanged: ${PRE_HEAD_SHA}"
+          fi
+
           if echo "${COMMENTS}" | grep -q "signal: claude-impl-done"; then
             STATE="Impl-Fix-Done"
             REASON=""
           elif echo "${COMMENTS}" | grep -q "signal: claude-impl-blocked"; then
             STATE="Impl-Fix-Blocked"
             REASON=""
+          elif [ "${PR_HAS_NEW_COMMIT}" = "true" ] && [ "${IS_DRAFT}" = "false" ]; then
+            # SM-14c: signal 不在だが新 commit 追加 + non-draft → false positive を回避
+            STATE="Impl-Fix-Done"
+            REASON="signal-missing"
           elif [ "${CLAUDE_OUTCOME}" = "cancelled" ]; then
             REASON="cancelled"
           fi

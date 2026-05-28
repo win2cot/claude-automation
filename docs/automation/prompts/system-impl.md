@@ -24,6 +24,7 @@
 3. 実装コミット
 4. PR (draft) を open。description には「未対応レビュー」セクション(空表)を含める
 5. PR を ready_for_review に変更
+6. **Issue に対応完了レポート投稿**(本文末尾に `<sub>signal: claude-impl-done</sub>` 必須、SM-14c)。これが Issue 経路の最終 step、省略は禁止
 
 ### レビュー指摘に応答する場合(review 起動)
 
@@ -32,7 +33,7 @@
 1. 全レビューコメント + 未対応テーブル + 過去対応履歴を読み込み
 2. 修正実装、push
 3. PR description の未対応テーブルを更新コミット
-4. PR コメントで「対応完了レポート」投稿(本文末尾に `<sub>signal: claude-impl-done</sub>` マーカー必須)
+4. **PR コメントで「対応完了レポート」投稿**(本文末尾に `<sub>signal: claude-impl-done</sub>` マーカー必須、SM-14c により最終 step として省略禁止)
 5. GitHub への markdown 本文投稿/編集は全て `--body-file` 経由(シェルクォートによる markdown 構造崩壊を回避、SM-11):
    - 短い 2 行構成のレポート: `printf '%s\n' '<本文>' '<sub>signal: ...</sub>' > /tmp/report.md && gh pr comment --body-file /tmp/report.md`
    - 長文 PR body(description 更新 / PR draft 作成): heredoc(`cat > /tmp/pr-body.md <<'PR_BODY_EOF' ... PR_BODY_EOF`)でファイル化 → `gh pr edit ... --body-file` / `gh pr create ... --body-file`
@@ -75,6 +76,22 @@
 対応不能レポートのテンプレートは `docs/automation/conventions.md` 参照。
 
 完遂時のマーカーは引き続き `<sub>signal: claude-impl-done</sub>`。**この 2 マーカーは排他**(同一コメントに両方含めない)。
+
+## signal コメント投稿は最終 step として必須(SM-14c)
+
+完遂時の `signal: claude-impl-done` / 停止時の `signal: claude-impl-blocked` 投稿は **省略禁止**。実装または修正の最終 step として必ず実行する。
+
+### turn 残量管理(max-turns 直前の優先度)
+
+`--max-turns` で turn 上限がある。残 turn が少なくなったら以下の順で優先処理:
+
+1. **signal コメント投稿** が最優先(他の付加的作業より先に実行)
+2. PR description の未対応テーブル更新(完遂時のみ、signal 投稿後でも可)
+3. その他の付加的作業(参考情報追記、コメント返信など)は省略可
+
+### 省略時の影響
+
+signal 不在で claude-impl が異常終了すると、detect-state ロジックが defensive に Impl-Aborted と判定し、`needs-human-decision` ラベル付与 + 誤通知が Issue/PR に残留する false positive 経路がある(SM-14c で detect-state 側でも抑止されるが、signal 省略は `reason=signal-missing` として audit-log に記録される)。turn 残量の管理失敗で本セクションの最終 step を欠落させないこと。
 
 ## 禁止事項
 
