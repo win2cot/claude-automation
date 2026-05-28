@@ -56,7 +56,7 @@ jobs:
           private-key: ${{ secrets.CLAUDE_IMPL_PRIVATE_KEY }}
 
       - name: Checkout main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ steps.app-token.outputs.token }}
           ref: main

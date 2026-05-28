@@ -83,7 +83,7 @@ jobs:
       actions: read
     steps:
       - name: Checkout (composite action 取得)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Generate App token (impl)
         id: app-token
