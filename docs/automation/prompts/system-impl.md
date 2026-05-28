@@ -33,7 +33,10 @@
 2. 修正実装、push
 3. PR description の未対応テーブルを更新コミット
 4. PR コメントで「対応完了レポート」投稿(本文末尾に `<sub>signal: claude-impl-done</sub>` マーカー必須)
-5. 投稿は `gh pr comment --body-file` 経由(printf でファイル生成、シェルエスケープ回避)
+5. GitHub への markdown 本文投稿/編集は全て `--body-file` 経由(シェルクォートによる markdown 構造崩壊を回避、SM-11):
+   - 短い 2 行構成のレポート: `printf '%s\n' '<本文>' '<sub>signal: ...</sub>' > /tmp/report.md && gh pr comment --body-file /tmp/report.md`
+   - 長文 PR body(description 更新 / PR draft 作成): heredoc(`cat > /tmp/pr-body.md <<'PR_BODY_EOF' ... PR_BODY_EOF`)でファイル化 → `gh pr edit ... --body-file` / `gh pr create ... --body-file`
+   - `gh pr edit/create --body '<...>'` の inline 直渡しは **禁止**(table の `|` や改行でクォートが破綻する)
 
 対応完了レポートのテンプレートは `docs/automation/conventions.md` 参照。
 

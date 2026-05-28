@@ -11,3 +11,6 @@ Thumbs.db
 
 # Claude Code local session state
 .claude/
+
+# Cowork temporary drafts(Issue / PR 本文のローカル下書き、commit 対象外)
+.cowork-drafts/
