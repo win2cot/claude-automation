@@ -33,14 +33,48 @@
 - HTML `<sub>` タグとして Markdown 上で小さなフッターとして表示される(ユーザにも控えめに見える)
 - contains() で部分一致検索可能
 
-### 投稿時の推奨実装
+### 投稿時の推奨実装(SM-11)
 
-シェルクォートでの意図しないエスケープを避けるため、`gh pr comment` は **`--body-file` 経由** で渡すことを推奨する:
+シェルクォートでの意図しないエスケープ(特に markdown table 内の `|`、改行、シングルクォート)による本文構造崩壊を避けるため、GitHub への markdown 本文投稿/編集は **すべて `--body-file` 経由** で渡す。`gh pr edit/create/comment --body '<...>'` の inline 直渡しは **禁止** とする。
+
+本文生成パターンは長さに応じて使い分ける:
+
+**短い 2 行構成のレポート(本文 + マーカー)→ `printf` でファイル化:**
 
 ```bash
 printf '%s\n' '<レポート本文>' '<sub>signal: claude-impl-done</sub>' > /tmp/report.md
 gh pr comment ${PR_NUMBER} --body-file /tmp/report.md
 ```
+
+**長文 PR body(description 更新 / PR draft 初回作成)→ heredoc でファイル化:**
+
+```bash
+cat > /tmp/pr-body.md <<'PR_BODY_EOF'
+## 目的
+
+(Issue 内容の要約)
+
+Closes #NNN
+
+## 変更内容
+
+(変更点)
+
+## 未対応レビュー
+
+| 指摘ID | 内容 | 状態 | 対応コミット | 備考 |
+|---|---|---|---|---|
+
+PR_BODY_EOF
+
+# PR description 更新時
+gh pr edit ${PR_NUMBER} --body-file /tmp/pr-body.md
+
+# PR draft 初回作成時
+gh pr create --draft --title '<title>' --body-file /tmp/pr-body.md --label task-type:impl
+```
+
+heredoc の区切り文字(例: `PR_BODY_EOF`)は本文に出ないユニーク名を採用し、`<<'PR_BODY_EOF'`(シングルクォート付き)で変数展開 / バッククォート展開を抑止する。これにより本文中の `${...}`・`` `code` ``・`'` をすべてリテラルとして保持できる。
 
 ### 対応完了レポートの本文テンプレート
 
