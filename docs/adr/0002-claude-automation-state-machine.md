@@ -362,7 +362,7 @@ findings 要素:
 #### ADR の外側(独立 PR、ステートマシン準拠だが ADR で定義不要)
 
 - **SM-11 impl-fix 出力の markdown 保持** — PR description / 対応完了レポートの markdown 構造保持
-- **SM-06 CI 完了前 review 抑止** — review workflow 冒頭で CI 完了待ち or `check_suite.completed` trigger 化
+- ~~**SM-06 CI 完了前 review 抑止**~~ — **取り下げ(2026-05-28、当初 SM-23 #75 に吸収予定 → SM-23 自体も同日取り下げ。race 自己回復パスを受容、Sprint 1 後再評価。詳細は tracker #36 追記その 7)**
 - **SM-04 max-turns 上限増** — `reusable-impl.yml` の max-turns を 80 / 100 に増やす実験
 - **SM-05 actions Node 24 移行** — `actions/checkout@v5` 即時、`actions/create-github-app-token` stable v3 待ち
 - **SM-15 実行ログ収集の収集側実装** — record スキーマは §2.7 で定義、収集 step の実装は独立 PR
@@ -389,7 +389,7 @@ SM 番号は本 ADR 内のローカル識別子であり、派生実装の Issue
 | SM-03 | (d-i) | Issue 起票時 scope ガイドライン | ADR 外 / 運用データ蓄積後に確定 |
 | SM-04 | (d-ii) | max-turns 上限増(80 / 100 実験) | ADR 外 / 独立 PR |
 | SM-05 | (e) | actions Node 24 移行 | ADR 外 / 独立 PR |
-| SM-06 | (f) | CI 完了前 review 抑止 | ADR 外 / 独立 PR |
+| SM-06 | (f) | CI 完了前 review 抑止 | **取り下げ(2026-05-28、当初 SM-23 #75 に吸収予定 → SM-23 自体も同日取り下げ、race 1 サイクル受容、tracker #36 追記その 7 参照)** |
 | SM-07 | (g) | `@claude` で Issue 起票 | ADR 外 / v1.3.0 候補 |
 | SM-08 | (h) | requested_changes 自動 dismiss | Tier 1 派生 |
 | SM-09 | (i) | sandbox CDN 許可 | ADR 外 / v1.3.0 候補 |
@@ -405,8 +405,9 @@ SM 番号は本 ADR 内のローカル識別子であり、派生実装の Issue
 | SM-L1 | (L-α) | 起動失敗 watchdog | Tier 1 派生 |
 | SM-L2 | (L-β) | Claude 早期失敗(OAuth 失効 / rate limit / quota) | Tier 2 明文化のみ |
 | SM-L3 | (L-γ) | Claude 実行中枯渇(context / output / throttle) | Tier 2 明文化のみ |
+| SM-23 | — | reviewer 責務分離 + APPROVE 後 CI red 自動 impl-fix | **取り下げ(2026-05-28、ROI 再評価で v1.2.0 不採用 / Sprint 1 後再評価、tracker #36 追記その 7 参照)** |
 
-旧記号 `(c)`(Draft 維持 + 部分 push の挙動仕様化)および `(o)`(本 ADR 自身)は SM 番号付与せず。memory 内の旧記号は本 ADR とは別タイミングで一括 rename する。
+旧記号 `(c)`(Draft 維持 + 部分 push の挙動仕様化)および `(o)`(本 ADR 自身)は SM 番号付与せず。SM-23 は旧記号無し(SM-06 (f) 議論から (f-iv) 派生として到達した経緯のため、(f) は SM-06 に紐付け維持)。memory 内の旧記号は本 ADR とは別タイミングで一括 rename する。
 
 ### 2.9 用語
 
@@ -498,3 +499,4 @@ SM 番号は本 ADR 内のローカル識別子であり、派生実装の Issue
 - **memory 内の旧記号 rename**: project_claude_automation.md ほか memory 全般の旧記号 `(a)`〜`(s)` / `(L-α/β/γ)` を本 ADR の SM 番号に揃える作業。ADR merge とは別タイミングで実施
 - **SM-L1 起動失敗 watchdog の復活判断**: 2026-05-27 ROI 再評価で v1.2.0 不採用 / 保留。再評価条件 = Sprint 1(2026-07-14 開始)以降の実 load 観察で「workflow run 自体が起動しない」障害が 1 件以上観測されたら SM-L1 復活 PR を起票、観測されなければ v1.3.0 以降または不採用判断。判断時の参照 Issue は #39(保留 close 済み)、復活時は新規 Issue として再起票
 - **SM-13 claude:ready 空振り抑止の復活判断**: 2026-05-27 ROI 再評価で v1.2.0 不採用 / 保留。再評価条件 = (a) Sprint 1(2026-07-14 開始)以降の実 load 観察で「`claude:ready` 誤付与による意図しない impl 起動」が 1 件以上観測される、または (b) Project field の GraphQL 読み取り経路が解決(impl App permission 拡張の case A 解禁、専用 PAT / 別 App / label mirroring の採用判断のいずれか)。判断時の参照 Issue は #41(保留 close 済み)、復活時は新規 Issue として再起票
+- **SM-06 / SM-23 race 受容(2026-05-28 ROI 再評価で v1.2.0 不採用 / 保留)**: PR #213 race は機能停止せず 1 サイクル余分で resolve に到達するため、reviewer 責務分離 + 自動 impl-fix の追加実装(SM-23 full)はメンテコスト ROI に見合わずと判断。Sprint 1(2026-07-14)以降の実 load 観察で race 頻度が運用上の問題と判明した場合は新規 SM として再起票し、その時点で §2.4 不正遷移表へ行追加 + §2.8 への記載見直しを行う。詳細は tracker #36 追記その 7。
