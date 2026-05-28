@@ -263,7 +263,9 @@ ADR-0002 §2.7:
 ADR-0002 §2.3 参照。`unknown` をデフォルトとし、観察パターンを積みながら拡張する。
 
 - `max-turns` / `barrier` / `oauth-revoked` / `rate-limit` / `quota-exhausted`
-- `context-overflow` / `output-overflow` / `throttle` / `cancelled` / `unknown`
+- `context-overflow` / `output-overflow` / `throttle` / `cancelled` / `denial-loop` / `unknown`
+
+`denial-loop` は SM-20 (Issue #53) で追加された B 経路の reason。`subtype: success` + `permission_denials_count` 高 + `artifacts.branch_created: false` で識別する(ADR-0002 §2.3 / §2.4 参照)。
 
 ### 8.4 1 run record の Markdown + JSON ハイブリッド例
 
