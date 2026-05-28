@@ -43,7 +43,7 @@ jobs:
           private-key: ${{ secrets.CLAUDE_IMPL_PRIVATE_KEY }}
 
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ steps.app-token.outputs.token }}
           ref: ${{ github.event.pull_request.head.ref }}
