@@ -225,7 +225,14 @@ jobs:
             echo "PR head SHA unchanged: ${PRE_HEAD_SHA}"
           fi
 
-          if echo "${COMMENTS}" | grep -q "signal: claude-impl-done"; then
+          # ===== SM-08b: signal + 新 commit AND 化 =====
+          # 過去 run が PR に残した signal を当該 run の signal として誤検知し、
+          # SM-08 step が直近の CHANGES_REQUESTED review を機械 dismiss して
+          # 連動フローが沈黙停止する不具合(PR #269 Run 68 観察由来、Issue #86)
+          # を抑止する。当該 run 中に新 commit が積まれた場合に限り Done と認める。
+          # signal は当該 run 自身が完遂時に投稿する設計(ADR-0002 §2.3)に従う。
+          if echo "${COMMENTS}" | grep -q "signal: claude-impl-done" \
+             && [ "${PR_HAS_NEW_COMMIT}" = "true" ]; then
             STATE="Impl-Fix-Done"
             REASON=""
           elif echo "${COMMENTS}" | grep -q "signal: claude-impl-blocked"; then
@@ -251,8 +258,12 @@ jobs:
       # CHANGES_REQUESTED のもの全部を対象にする(ADR-0002 §2.4 表)。
       # 失敗時は ::warning:: で workflow log に残すのみ、`needs-human-decision`
       # は付与しない(re-review で上書きされるため非クリティカル、ADR-0002 §2.6)。
+      # SM-08b belt-and-suspenders: signal-missing(SM-14c 救済経路)は signal 不在の
+      # まま新 commit + non-draft のみで Done とした弱信頼ケースのため、本 dismiss は
+      # 抑止する。明示 signal を伴う Done のみが review dismiss の対象。
       - name: Dismiss stale requested_changes reviews (SM-08)
         if: always() && steps.state.outputs.state == 'Impl-Fix-Done'
+            && steps.state.outputs.reason != 'signal-missing'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
