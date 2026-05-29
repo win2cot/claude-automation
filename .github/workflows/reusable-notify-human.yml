@@ -68,8 +68,8 @@ jobs:
           # body はシェルクォートエスケープを避けるため --body-file 経由
           BODY_FILE=$(mktemp)
           printf '%s\n\n%s\n' \
-            "${MENTION} 設計分岐に直面しました。" \
-            "直前の Claude コメントから理由と推奨案を確認のうえ、判断をお願いします。" \
+            "${MENTION} \`needs-human-decision\` ラベルが付与されました。人手対応が必要です。" \
+            "直前のコメント本文に状況・理由が記載されています。確認のうえ、対応をお願いします。" \
             > "${BODY_FILE}"
           gh issue comment "${ISSUE_OR_PR_NUMBER}" \
             --repo "${{ github.repository }}" \
