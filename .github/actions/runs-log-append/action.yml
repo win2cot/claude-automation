@@ -152,12 +152,16 @@ runs:
         } > "${BODY_FILE}"
 
         # 副作用ゼロ: 失敗しても本流に影響なし
-        if gh issue comment "${RUNS_LOG_ISSUE}" \
-            --repo win2cot/claude-automation \
-            --body-file "${BODY_FILE}"; then
+        # 失敗時は exit code + stderr/stdout を warning に出して切り分けできるようにする(Issue #87)
+        OUT=$(gh issue comment "${RUNS_LOG_ISSUE}" \
+                --repo win2cot/claude-automation \
+                --body-file "${BODY_FILE}" 2>&1)
+        RC=$?
+        if [ ${RC} -eq 0 ]; then
           echo "::notice::runs-log appended (run_id=${RUN_ID}, workflow=${WORKFLOW}, state=${STATE})"
         else
-          echo "::warning::runs-log append failed (run_id=${RUN_ID}, workflow=${WORKFLOW}); continuing"
+          echo "::warning::runs-log append failed (run_id=${RUN_ID}, workflow=${WORKFLOW}, exit=${RC}); continuing"
+          echo "${OUT}" | sed 's/^/::warning::runs-log stderr: /'
         fi
 
         exit 0

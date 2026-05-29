@@ -110,12 +110,17 @@ runs:
           echo '```'
         } > "${BODY_FILE}"
 
-        if gh issue comment "${AUDIT_LOG_ISSUE}" \
-            --repo win2cot/claude-automation \
-            --body-file "${BODY_FILE}"; then
+        # 副作用ゼロ: 失敗しても本流に影響なし
+        # 失敗時は exit code + stderr/stdout を warning に出して切り分けできるようにする(Issue #87)
+        OUT=$(gh issue comment "${AUDIT_LOG_ISSUE}" \
+                --repo win2cot/claude-automation \
+                --body-file "${BODY_FILE}" 2>&1)
+        RC=$?
+        if [ ${RC} -eq 0 ]; then
           echo "::notice::audit-log appended (run_id=${RUN_ID}, audit_type=${AUDIT_TYPE}, state=${STATE})"
         else
-          echo "::warning::audit-log append failed (run_id=${RUN_ID}, audit_type=${AUDIT_TYPE}); continuing"
+          echo "::warning::audit-log append failed (run_id=${RUN_ID}, audit_type=${AUDIT_TYPE}, exit=${RC}); continuing"
+          echo "${OUT}" | sed 's/^/::warning::audit-log stderr: /'
         fi
 
         exit 0
