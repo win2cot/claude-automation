@@ -19,8 +19,8 @@
 
 実装/修正を push する前に必ず以下を実行し、緑になるまで反復する:
 
-1. `./gradlew spotlessApply` — 整形差分が生じた場合は `git add -u && git commit` で整形コミットを追加してから次へ進む
-2. `./gradlew :webapi:check` — CI の test と同一コマンド(spotlessCheck + JUnit + verification を内包、外部サービス不要)
+1. `./gradlew :webapi:spotlessApply` — 整形差分が生じた場合は `git add -u && git commit` で整形コミットを追加してから次へ進む
+2. `./gradlew :webapi:check` を IT 込みで完全実行する。**Docker 未搭載と決めつけない**。まず `docker info` で疎通確認し、Docker が使えるなら IT(統合テスト)込みで緑化する。`docker info` が本当に socket 到達不可(接続エラー)の場合のみ IT を除外し、その旨をレポートに明記して非 IT 部分を緑化する(IT は CI 検証に委ねる)。
 
 緑確認後にのみ push → ready → signal を行う。**赤いまま ready_for_review にしない。**
 

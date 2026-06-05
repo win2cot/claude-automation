@@ -141,7 +141,7 @@ jobs:
           prompt: ${{ steps.prompt.outputs.PROMPT }}
           claude_args: |
             --max-turns ${{ vars.CLAUDE_MAX_TURNS_IMPL || 80 }}
-            --allowedTools "Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git config:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh pr create:*),Bash(gh pr edit:*),Bash(gh pr ready:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(gh label:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Bash(mkdir:*),Bash(touch:*),Bash(echo:*),Bash(./gradlew:*),Read,Write,Edit,Glob,Grep"
+            --allowedTools "Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git config:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh pr create:*),Bash(gh pr edit:*),Bash(gh pr ready:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(gh label:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Bash(mkdir:*),Bash(touch:*),Bash(echo:*),Bash(./gradlew:*),Bash(docker:*),Read,Write,Edit,Glob,Grep"
 
       # ===== SM-15: 実行ログ収集(append-only, 副作用ゼロ)=====
       - name: Detect run state for runs-log
