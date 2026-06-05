@@ -28,6 +28,8 @@ jobs:
   impl-fix:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"
     permissions:
       contents: write
       pull-requests: write
