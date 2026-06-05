@@ -15,6 +15,17 @@
 5. **ADR**: `tasks-webapi/docs/adr/` 配下の関連ファイル
 6. **対象コード**: 変更対象のファイルとその周辺
 
+## 自己検証ゲート(push 前に必須・最優先)
+
+実装/修正を push する前に必ず以下を実行し、緑になるまで反復する:
+
+1. `./gradlew spotlessApply` — 整形差分が生じた場合は `git add -u && git commit` で整形コミットを追加してから次へ進む
+2. `./gradlew :webapi:check` — CI の test と同一コマンド(spotlessCheck + JUnit + verification を内包、外部サービス不要)
+
+緑確認後にのみ push → ready → signal を行う。**赤いまま ready_for_review にしない。**
+
+緑化不能(本質的失敗 / 原因不明 / 検証不能 / ターン不足)の場合は push せず、カテゴリ B `claude-impl-blocked` で停止し、どの gradle コマンドがどう失敗したかをレポートに残す。
+
 ## 出力ルール
 
 ### Issue を受け取って実装する場合(claude:ready 起動)
@@ -22,16 +33,17 @@
 1. Issue 本文に「実装方針コメント」を投稿(着手宣言 + 方針サマリ)
 2. ブランチ作成(命名: `claude/impl/issue-NNN-short-description`)
 3. 実装コミット
-4. PR (draft) を open。description には「未対応レビュー」セクション(空表)を含める
-5. PR を ready_for_review に変更
-6. **Issue に対応完了レポート投稿**(本文末尾に `<sub>signal: claude-impl-done</sub>` 必須、SM-14c)。これが Issue 経路の最終 step、省略は禁止
+4. 自己検証ゲートを通過（緑確認）。緑にできなければ push せず blocked 停止
+5. PR (draft) を open。description には「未対応レビュー」セクション(空表)を含める
+6. PR を ready_for_review に変更
+7. **Issue に対応完了レポート投稿**(本文末尾に `<sub>signal: claude-impl-done</sub>` 必須、SM-14c)。これが Issue 経路の最終 step、省略は禁止
 
 ### レビュー指摘に応答する場合(review 起動)
 
 **push と対応完了レポート投稿は 1 ジョブで完結させる**(切断防止)。
 
 1. 全レビューコメント + 未対応テーブル + 過去対応履歴を読み込み
-2. 修正実装、push
+2. 修正実装 → 自己検証ゲート通過（緑確認）→ push。緑にできなければ push せず blocked 停止
 3. PR description の未対応テーブルを更新コミット
 4. **PR コメントで「対応完了レポート」投稿**(本文末尾に `<sub>signal: claude-impl-done</sub>` マーカー必須、SM-14c により最終 step として省略禁止)
 5. GitHub への markdown 本文投稿/編集は全て `--body-file` 経由(シェルクォートによる markdown 構造崩壊を回避、SM-11):
@@ -67,6 +79,7 @@
 - 例 1: claude-code-action による保護ファイル自動 restore で書き込みが反映されない(該当ファイル例は `CLAUDE.md`, `.claude/`, `.mcp.json` 等。**ただしリストは流動的なため、リストを当てにせず「実際に書き換わったか」で判定する**)
 - 例 2: レビュー指摘の前提と現状コードに齟齬があり、指摘どおりに修正すると別の整合性が崩れる
 - 例 3: その他、原因不明の修正失敗
+- 例 4: 自己検証ゲートで緑に到達できない(`:webapi:check` が Issue スコープ内修正で緑化不能、または環境/前提齟齬)。赤を push せず blocked 停止
 
 ### 停止時の手順(カテゴリ A / B 共通)
 
@@ -86,9 +99,10 @@
 
 `--max-turns` で turn 上限がある。残 turn が少なくなったら以下の順で優先処理:
 
-1. **signal コメント投稿** が最優先(他の付加的作業より先に実行)
-2. PR description の未対応テーブル更新(完遂時のみ、signal 投稿後でも可)
-3. その他の付加的作業(参考情報追記、コメント返信など)は省略可
+1. **自己検証ゲート通過（`:webapi:check` 緑）→ push** を最優先で進める。ただし **signal 投稿に必要なターンを必ず残すこと** — 残ターンが逼迫したらゲート反復を打ち切り、緑化不能として `claude-impl-blocked` signal を投稿する
+2. **signal コメント投稿**（`claude-impl-done` または `claude-impl-blocked`）— ターンを使い切る前に確保し、省略禁止
+3. PR description の未対応テーブル更新(完遂時のみ、signal 投稿後でも可)
+4. その他の付加的作業(参考情報追記、コメント返信など)は省略可
 
 ### 省略時の影響
 
