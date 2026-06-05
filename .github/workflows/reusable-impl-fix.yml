@@ -189,7 +189,7 @@ jobs:
           allowed_non_write_users: "claude-automation-impl,claude-automation-review"
           claude_args: |
             --max-turns ${{ vars.CLAUDE_MAX_TURNS_IMPL_FIX || 50 }}
-            --allowedTools "Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git config:*),Bash(gh pr view:*),Bash(gh pr edit:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Bash(mkdir:*),Bash(touch:*),Bash(echo:*),Bash(printf:*),Bash(./gradlew:*),Read,Write,Edit,Glob,Grep"
+            --allowedTools "Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git config:*),Bash(gh pr view:*),Bash(gh pr edit:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(grep:*),Bash(test:*),Bash(mkdir:*),Bash(touch:*),Bash(echo:*),Bash(printf:*),Bash(./gradlew:*),Bash(docker:*),Read,Write,Edit,Glob,Grep"
 
       # ===== SM-15: 実行ログ収集(append-only, 副作用ゼロ)=====
       - name: Detect run state for runs-log
