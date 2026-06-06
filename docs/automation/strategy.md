@@ -304,10 +304,17 @@ jobs:
 
 tag(`@v1`, `@v2`)で版管理することで tasks-webapi 側の workflow ファイル変更を `uses:` 行のみに抑え、Workflow validation エラーの発生頻度を最小化する。
 
-## 7. 関連ドキュメント
+## 7. 補助 workflow(主経路から独立)
+
+主経路(impl / review / auto-merge / notify-human)とは orthogonal な、特定ユースケース向けの補助 workflow を別途持つ。ADR-0002 のステートマシンには組み入れない。
+
+- [`reusable-renovate-approve.yml`](../../.github/workflows/reusable-renovate-approve.yml): Renovate 依存更新 PR を機械的判定で `claude-automation-review[bot]` として approve する補助 workflow。LLM 推論不使用。詳細は [`renovate-approve.md`](./renovate-approve.md)。
+
+## 8. 関連ドキュメント
 
 - `docs/adr/0001-claude-automation-design.md`
 - `docs/automation/conventions.md`
+- `docs/automation/renovate-approve.md`
 - `docs/automation/prompts/`
 - `docs/ops/setup-github-app.md`
 - `docs/ops/runbook.md`
