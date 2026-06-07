@@ -1,0 +1,195 @@
+# Renovate PR 専用 auto-approve reusable workflow
+# 認証: CLAUDE_REVIEW App(approve した actor で auto-merge 有効化することで整合性を保つ)
+#
+# Renovate PR を機械的に判定し、受入条件を満たす場合のみ
+# claude-automation-review[bot] として approve する。
+# LLM 推論を使わないため Claude Code Action 枠を消費しない。
+# approve 後の auto-merge 有効化は既存 reusable-auto-merge.yml が担う。
+#
+# 起動例(利用者側 shim):
+#   on:
+#     pull_request:
+#       types: [opened, synchronize, ready_for_review]
+#     check_suite:
+#       types: [completed]
+#   jobs:
+#     approve:
+#       if: >-
+#         (github.event_name == 'pull_request' && github.event.pull_request.user.login == 'renovate[bot]') ||
+#         (github.event_name == 'check_suite' && github.event.check_suite.conclusion == 'success' && github.event.check_suite.pull_requests[0] != null)
+#       uses: win2cot/claude-automation/.github/workflows/reusable-renovate-approve.yml@v1
+#       with:
+#         pr_number: ${{ github.event.pull_request.number || github.event.check_suite.pull_requests[0].number }}
+#       secrets:
+#         CLAUDE_REVIEW_APP_ID: ${{ secrets.CLAUDE_REVIEW_APP_ID }}
+#         CLAUDE_REVIEW_PRIVATE_KEY: ${{ secrets.CLAUDE_REVIEW_PRIVATE_KEY }}
+
+name: Reusable - Renovate Auto Approve
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: '評価対象の PR 番号'
+        required: true
+        type: number
+      block_packages:
+        description: 'PR body に含まれるとブロックするパッケージ名のカンマ区切りリスト(部分一致)'
+        required: false
+        default: 'org.springframework,org.projectlombok:lombok,com.google.errorprone:error_prone_core,com.uber.nullaway:nullaway'
+        type: string
+      allowed_file_patterns:
+        description: '変更ファイルとして許可する fnmatch glob パターン(改行区切り)'
+        required: false
+        default: |
+          **/build.gradle
+          **/build.gradle.kts
+          gradle/libs.versions.toml
+          gradle/wrapper/**
+          **/Dockerfile
+          .github/workflows/*.yml
+          .github/workflows/*.yaml
+        type: string
+      update_type_label:
+        description: '許可する update type を示すラベル名(Renovate packageRules で付与する)。空文字を指定すると本チェックを無効化'
+        required: false
+        default: 'update:patch'
+        type: string
+    secrets:
+      CLAUDE_REVIEW_APP_ID:
+        required: true
+      CLAUDE_REVIEW_PRIVATE_KEY:
+        required: true
+
+# 同一 PR に対して複数のイベント(pull_request / check_suite など)が並走しても
+# 順次実行で十分。approve は冪等(GitHub 側 dedup)なので cancel しない。
+concurrency:
+  group: renovate-approve-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Generate App token (review)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_REVIEW_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_REVIEW_PRIVATE_KEY }}
+
+      - name: Fetch PR data
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # SM-11 整合: `-q` で抽出してから redirect する形式は 1 byte truncate 事故があるため、
+          # 生 JSON を `--json` のみで吐き出し jq で個別取り出しする。
+          gh pr view "${PR_NUMBER}" \
+            --repo "${REPO}" \
+            --json number,author,labels,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,files,body \
+            > /tmp/pr.json
+          jq -r '"PR #\(.number) author=\(.author.login // "?") state=\(.mergeStateStatus // "?") labels=\([.labels[].name] | join(","))"' /tmp/pr.json
+
+      - name: Evaluate Renovate approval rules
+        id: eval
+        env:
+          BLOCK_PACKAGES: ${{ inputs.block_packages }}
+          ALLOWED_FILE_PATTERNS: ${{ inputs.allowed_file_patterns }}
+          UPDATE_TYPE_LABEL: ${{ inputs.update_type_label }}
+        run: |
+          # interpolation を全部抑止するため heredoc は 'PY' クォート
+          python3 - <<'PY'
+          import fnmatch
+          import json
+          import os
+          import sys
+
+          with open('/tmp/pr.json', encoding='utf-8') as fp:
+              pr = json.load(fp)
+
+          def skip(msg):
+              # 受入条件を満たさない場合は no-op(job 自体は success)。
+              # needs-human-decision ラベル付与はしない(設計判断 6)。
+              print(f'SKIP: {msg}')
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+                  out.write('decision=skip\n')
+                  out.write(f'reason={msg}\n')
+              sys.exit(0)
+
+          # 1. author = renovate[bot]
+          # gh CLI の json.author.login は通常 'app/renovate'、event payload は 'renovate[bot]'。
+          # 両方許可しておく(reusable は両経由で呼ばれうる)。
+          author = (pr.get('author') or {}).get('login', '')
+          if author not in ('renovate[bot]', 'app/renovate'):
+              skip(f'author={author!r} is not Renovate')
+
+          # 2. labels
+          labels = {lab.get('name', '') for lab in (pr.get('labels') or [])}
+          if 'dependencies' not in labels:
+              skip("required label 'dependencies' is missing")
+          if 'needs-human-decision' in labels:
+              skip("label 'needs-human-decision' is present (escalated)")
+          update_label = os.environ['UPDATE_TYPE_LABEL'].strip()
+          if update_label and update_label not in labels:
+              skip(
+                  f"update type label {update_label!r} is missing "
+                  "(set Renovate packageRules to add it)"
+              )
+
+          # 3. block package list (substring match in PR body)
+          body = pr.get('body') or ''
+          blocked = [p.strip() for p in os.environ['BLOCK_PACKAGES'].split(',') if p.strip()]
+          for pkg in blocked:
+              if pkg in body:
+                  skip(f"blocked package {pkg!r} found in PR body")
+
+          # 4. CI status
+          state = pr.get('mergeStateStatus') or ''
+          if state != 'CLEAN':
+              skip(f'mergeStateStatus={state!r} (expected CLEAN)')
+          for check in (pr.get('statusCheckRollup') or []):
+              # check runs use 'conclusion', status checks use 'state'
+              status = check.get('conclusion') or check.get('state') or ''
+              if status not in ('SUCCESS', 'NEUTRAL', 'SKIPPED'):
+                  name = check.get('name') or check.get('context') or '?'
+                  skip(f'check {name!r} status={status!r} (expected SUCCESS)')
+
+          # 5. file path allow list
+          allowed = [p.strip() for p in os.environ['ALLOWED_FILE_PATTERNS'].splitlines() if p.strip()]
+          files = pr.get('files') or []
+          if not files:
+              skip('no changed files reported by gh CLI')
+          for f in files:
+              path = f.get('path') or ''
+              if not any(fnmatch.fnmatchcase(path, pat) for pat in allowed):
+                  skip(f"file {path!r} does not match any allowed pattern")
+
+          print('OK: all rules passed, will approve')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write('decision=approve\n')
+              out.write('reason=all rules passed\n')
+          PY
+
+      - name: Approve PR
+        if: steps.eval.outputs.decision == 'approve'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # SM-11 整合: 短いレポート本文は printf でファイル化、--body-file で投稿。
+          printf '%s\n' \
+            'Mechanical auto-approve: Renovate patch update.' \
+            '' \
+            'All required checks green / changes restricted to allowed dependency files / no blocked packages / `update:patch` label present.' \
+            '' \
+            'Rule set: `reusable-renovate-approve.yml@v1`.' \
+            > /tmp/review_body.md
+          gh pr review "${PR_NUMBER}" --repo "${REPO}" --approve --body-file /tmp/review_body.md

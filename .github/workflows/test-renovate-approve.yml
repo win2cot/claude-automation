@@ -1,0 +1,39 @@
+# claude-automation 内で reusable-renovate-approve.yml を発火させるテスト用 workflow
+#
+# 通常は Renovate が発行した PR のみ対象。
+# lab 用に「PR title が `[lab-renovate]` で始まる」ケースも許可することで
+# 本リポ内でも実 Renovate PR を待たずに動作確認できる。
+# 詳細手順: docs/automation/renovate-approve.md §lab セルフテスト手順
+
+name: Test - Renovate Auto Approve (lab)
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+  check_suite:
+    types: [completed]
+
+# reusable workflow が要求する権限を呼び出し側でも明示(GitHub Actions の仕様)。
+# reusable-renovate-approve.yml の jobs.approve.permissions と subset 整合が必要。
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  approve:
+    # 起動条件:
+    # (1) pull_request イベント: author が renovate[bot] か、PR title が `[lab-renovate]` 始まり(lab 検証用)
+    # (2) check_suite (completed, success): 紐付き PR が存在する
+    if: >-
+      (github.event_name == 'pull_request' &&
+       (github.event.pull_request.user.login == 'renovate[bot]' ||
+        startsWith(github.event.pull_request.title, '[lab-renovate]'))) ||
+      (github.event_name == 'check_suite' &&
+       github.event.check_suite.conclusion == 'success' &&
+       github.event.check_suite.pull_requests[0] != null)
+    uses: ./.github/workflows/reusable-renovate-approve.yml
+    with:
+      pr_number: >-
+        ${{ github.event.pull_request.number ||
+            github.event.check_suite.pull_requests[0].number }}
+    secrets: inherit
