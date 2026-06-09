@@ -210,7 +210,7 @@ Closes #NNN
 - [ ] ログ・観測性の妥当性
 - [ ] スコープ逸脱なし
 - [ ] 日本語ドキュメント更新(必要時)
-- [ ] CI green
+- [ ] CI 結果(in_progress は ⚠・approve をブロックしない / concluded=failure のみ ✗。green の最終担保は branch protection)
 - [ ] 未対応テーブル空
 ```
 
