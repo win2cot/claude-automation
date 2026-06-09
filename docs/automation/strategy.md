@@ -95,7 +95,7 @@ flowchart TD
 - 作業:
   - PR 全差分 + 全レビューコメント + 最新「対応完了レポート」+ 未対応テーブル + 規約 + ADR を読む
   - 未対応残 or 新規問題 → review コメント追加(→ 06 へ戻る)
-  - 全 ✓ + CI green → approve
+  - 全 ✓ かつ CI が failure でない(進行中は許容、green の最終担保は branch protection + auto-merge)→ approve
 - 出力: approve or review コメント追加
 
 ### 08. auto-merge 有効化
