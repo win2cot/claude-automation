@@ -150,10 +150,13 @@ jobs:
               if pkg in body:
                   skip(f"blocked package {pkg!r} found in PR body")
 
-          # 4. CI status
-          state = pr.get('mergeStateStatus') or ''
-          if state != 'CLEAN':
-              skip(f'mergeStateStatus={state!r} (expected CLEAN)')
+          # 4. マージ可能性 + CI status
+          # 承認必須リポでは未承認の間 mergeStateStatus が BLOCKED のままで CLEAN にならない。
+          # CLEAN を要求すると approve<->CLEAN の循環で永久 no-op になるため CLEAN は要求せず、
+          # コンフリクト不在(mergeable==MERGEABLE)と全 check green(下のループ)を前提にする。
+          mergeable = pr.get('mergeable') or ''
+          if mergeable != 'MERGEABLE':
+              skip(f'mergeable={mergeable!r} (expected MERGEABLE)')
           for check in (pr.get('statusCheckRollup') or []):
               # check runs use 'conclusion', status checks use 'state'
               status = check.get('conclusion') or check.get('state') or ''
