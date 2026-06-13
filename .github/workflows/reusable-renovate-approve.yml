@@ -91,11 +91,17 @@ jobs:
         run: |
           # SM-11 整合: `-q` で抽出してから redirect する形式は 1 byte truncate 事故があるため、
           # 生 JSON を `--json` のみで吐き出し jq で個別取り出しする。
-          gh pr view "${PR_NUMBER}" \
-            --repo "${REPO}" \
-            --json number,author,labels,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,files,body \
-            > /tmp/pr.json
-          jq -r '"PR #\(.number) author=\(.author.login // "?") state=\(.mergeStateStatus // "?") labels=\([.labels[].name] | join(","))"' /tmp/pr.json
+          # mergeable は force-push 直後に UNKNOWN になりうるので、確定するまで数回だけ retry する
+          # (CI 完了は待たない。mergeability の計算待ちのみで数秒で確定する)。
+          for i in 1 2 3 4 5; do
+            gh pr view "${PR_NUMBER}" \
+              --repo "${REPO}" \
+              --json number,author,labels,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,files,body \
+              > /tmp/pr.json
+            [ "$(jq -r '.mergeable // "UNKNOWN"' /tmp/pr.json)" != "UNKNOWN" ] && break
+            echo "mergeable=UNKNOWN; retry ${i}/5"; sleep 5
+          done
+          jq -r '"PR #\(.number) author=\(.author.login // "?") mergeable=\(.mergeable // "?") labels=\([.labels[].name] | join(","))"' /tmp/pr.json
 
       - name: Evaluate Renovate approval rules
         id: eval
@@ -150,19 +156,15 @@ jobs:
               if pkg in body:
                   skip(f"blocked package {pkg!r} found in PR body")
 
-          # 4. マージ可能性 + CI status
-          # 承認必須リポでは未承認の間 mergeStateStatus が BLOCKED のままで CLEAN にならない。
-          # CLEAN を要求すると approve<->CLEAN の循環で永久 no-op になるため CLEAN は要求せず、
-          # コンフリクト不在(mergeable==MERGEABLE)と全 check green(下のループ)を前提にする。
+          # 4. マージ可能性(コンフリクト不在)
+          # 承認可否は CI を観測せずポリシー判定のみで決める。CI 緑判定は利用者リポの ruleset の
+          # required status checks + GitHub auto-merge に委譲する(auto-merge は required checks
+          # 充足までマージしないため、CI 緑前に承認しても赤いまま merge されることはない)。
+          # check_suite 完了イベントは GitHub Actions 生成分が再帰防止で発火しないため CI 完了後の
+          # 再評価トリガに使えない。よって本 workflow は CI を観測しない設計とする。
           mergeable = pr.get('mergeable') or ''
           if mergeable != 'MERGEABLE':
               skip(f'mergeable={mergeable!r} (expected MERGEABLE)')
-          for check in (pr.get('statusCheckRollup') or []):
-              # check runs use 'conclusion', status checks use 'state'
-              status = check.get('conclusion') or check.get('state') or ''
-              if status not in ('SUCCESS', 'NEUTRAL', 'SKIPPED'):
-                  name = check.get('name') or check.get('context') or '?'
-                  skip(f'check {name!r} status={status!r} (expected SUCCESS)')
 
           # 5. file path allow list
           allowed = [p.strip() for p in os.environ['ALLOWED_FILE_PATTERNS'].splitlines() if p.strip()]
